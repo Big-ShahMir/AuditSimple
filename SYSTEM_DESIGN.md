@@ -416,7 +416,7 @@ export interface AuditStatusResponse {
   status: AuditStatus;
   progress: number; // 0-100
   currentStage: string;
-  estimatedSecondsRemaining: number | null;
+  estimatedSecondsRemainingb: number | null;
 }
 
 export interface AuditResultResponse {

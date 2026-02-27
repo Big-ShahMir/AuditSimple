@@ -1,0 +1,34 @@
+# docker-compose.override.yml
+# Local development compose fragment.
+# This file is automatically merged with docker-compose.yml by Docker Compose
+# when running `docker-compose up` in development.
+#
+# Do NOT commit secrets to this file — use a .env file for those.
+
+version: "3.9"
+
+services:
+  presidio:
+    build:
+      context: ./services/presidio
+      dockerfile: Dockerfile
+    image: auditsimple-presidio:dev
+    ports:
+      - "5002:5002"
+    environment:
+      - PRESIDIO_LOG_LEVEL=DEBUG
+      - CORS_ORIGINS=http://localhost:3000
+      - PRESIDIO_WORKERS=2 # Fewer workers locally to save memory
+      - PRESIDIO_TIMEOUT=120
+    volumes:
+      # Mount recognizers directory for hot-reload during development.
+      # Changes to recognizer files take effect on the next request without
+      # rebuilding the image (gunicorn in dev mode reloads on file changes).
+      - ./services/presidio/recognizers:/app/recognizers
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:5002/health" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s # Allow time for spaCy model load on first start

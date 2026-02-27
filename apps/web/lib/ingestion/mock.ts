@@ -1,0 +1,196 @@
+// ============================================================
+// apps/web/lib/ingestion/mock.ts
+// ============================================================
+// Mock ingestion for unit testing and parallel frontend development.
+// Returns a realistic AgentState with PII placeholders already applied —
+// no real file, no Presidio call, no database writes.
+//
+// Simulates 1-2 seconds of processing delay (random within range).
+//
+// USAGE:
+//   if (process.env.USE_MOCK_INGESTION === 'true') {
+//     return mockIngest(fileName);
+//   }
+// ============================================================
+
+import { randomUUID } from "crypto";
+import type { AgentState, AuditWarning } from "@auditsimple/types";
+import { AuditStatus, PIIEntityType, ContractType } from "@auditsimple/types";
+
+// ---------------------------------------------------------------------------
+// Realistic mock data
+// ---------------------------------------------------------------------------
+
+// A mortgage contract excerpt with PII already scrubbed (what the LLM sees)
+const MOCK_SCRUBBLED_TEXT = `
+RESIDENTIAL MORTGAGE AGREEMENT
+
+Lender: First National Trust Company
+Borrower: [PERSON_1]
+Co-Borrower: [PERSON_2]
+Contact: [EMAIL_1] | [PHONE_1]
+
+Property Address: [ADDRESS_1]
+Legal Description: Lot 14, Block 7, Riverview Estates
+
+LOAN DETAILS
+Principal Amount: $485,000.00
+Interest Rate: 6.49% per annum (fixed for 5-year term)
+Amortization Period: 25 years
+Term: 5 years
+Payment Frequency: Monthly
+Monthly Payment: $3,241.18 (principal + interest)
+First Payment Date: April 1, 2026
+Maturity Date: March 1, 2031
+
+PREPAYMENT PRIVILEGES
+The Borrower may, on any payment date, prepay up to 20% of the original
+principal amount without penalty. Additional lump-sum prepayments exceeding
+this threshold are subject to an Interest Rate Differential (IRD) penalty or
+3 months' interest, whichever is greater.
+
+LATE PAYMENT PENALTY
+Payments received more than 5 business days after the due date will incur a
+late payment fee of $50.00 per occurrence. Three consecutive missed payments
+will constitute default under this Agreement.
+
+DEFAULT AND ACCELERATION
+Upon default, the full outstanding principal balance, accrued interest, and
+all fees become immediately due and payable at the Lender's sole discretion.
+
+INSURANCE REQUIREMENTS
+The Borrower is required to maintain property insurance for the full replacement
+value naming First National Trust Company as loss payee. Failure to maintain
+adequate insurance is an event of default.
+
+CMHC MORTGAGE INSURANCE
+This mortgage is insured under the National Housing Act. The CMHC mortgage
+insurance premium of $15,695.00 (3.24% of principal) has been added to the
+principal balance, resulting in a total insured amount of $500,695.00.
+
+ACCOUNT INFORMATION
+Disbursement Account: [ACCOUNT_***4523]
+Payment Account: [ACCOUNT_***8901]
+
+SIGNATURES
+Borrower: [PERSON_1] | Date: [DOB_REDACTED]
+Co-Borrower: [PERSON_2] | Date: [DOB_REDACTED]
+Lender Representative: [PERSON_3]
+`.trim();
+
+const MOCK_PAGE_TEXTS: AgentState["pageTexts"] = [
+    {
+        pageNumber: 1,
+        text: MOCK_SCRUBBLED_TEXT.slice(0, Math.floor(MOCK_SCRUBBLED_TEXT.length / 2)),
+        wordPositions: [
+            {
+                word: "RESIDENTIAL",
+                boundingBox: { topLeftX: 0.05, topLeftY: 0.03, bottomRightX: 0.35, bottomRightY: 0.06 },
+                charOffset: 0,
+            },
+            {
+                word: "MORTGAGE",
+                boundingBox: { topLeftX: 0.36, topLeftY: 0.03, bottomRightX: 0.60, bottomRightY: 0.06 },
+                charOffset: 12,
+            },
+            {
+                word: "6.49%",
+                boundingBox: { topLeftX: 0.38, topLeftY: 0.32, bottomRightX: 0.52, bottomRightY: 0.35 },
+                charOffset: 285,
+            },
+            {
+                word: "20%",
+                boundingBox: { topLeftX: 0.52, topLeftY: 0.55, bottomRightX: 0.60, bottomRightY: 0.58 },
+                charOffset: 512,
+            },
+        ],
+    },
+    {
+        pageNumber: 2,
+        text: MOCK_SCRUBBLED_TEXT.slice(Math.floor(MOCK_SCRUBBLED_TEXT.length / 2)),
+        wordPositions: [
+            {
+                word: "$50.00",
+                boundingBox: { topLeftX: 0.40, topLeftY: 0.08, bottomRightX: 0.54, bottomRightY: 0.11 },
+                charOffset: 800,
+            },
+            {
+                word: "CMHC",
+                boundingBox: { topLeftX: 0.05, topLeftY: 0.42, bottomRightX: 0.16, bottomRightY: 0.45 },
+                charOffset: 1040,
+            },
+            {
+                word: "3.24%",
+                boundingBox: { topLeftX: 0.30, topLeftY: 0.50, bottomRightX: 0.44, bottomRightY: 0.53 },
+                charOffset: 1120,
+            },
+        ],
+    },
+];
+
+const MOCK_WARNINGS: AuditWarning[] = [
+    {
+        code: "MOCK_DATA",
+        message: "This AgentState was generated by the mock ingestion module — no real file was processed.",
+        recoverable: true,
+        stage: AuditStatus.UPLOADING,
+    },
+];
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns a realistic mock AgentState with PII already scrubbed.
+ * Simulates 1-2 seconds of processing delay.
+ *
+ * @param fileName - The filename provided by the frontend (for display only).
+ * @returns Fake but structurally correct { auditId, state } for testing.
+ */
+export async function mockIngest(
+    fileName: string
+): Promise<{ auditId: string; state: AgentState }> {
+    // Simulate realistic ingestion delay (1000-2000ms)
+    const delayMs = 1000 + Math.floor(Math.random() * 1000);
+    await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+
+    const auditId = randomUUID();
+    const now = new Date().toISOString();
+
+    const state: AgentState = {
+        audit: {
+            auditId,
+            status: AuditStatus.CLASSIFYING,
+            createdAt: now,
+            updatedAt: now,
+            completedAt: null,
+            contractType: ContractType.MORTGAGE,
+            originalFileName: fileName,
+            documentHash: "mock-sha256-" + auditId.replace(/-/g, "").slice(0, 16),
+            piiSummary: {
+                totalRedacted: 9,
+                entityTypeCounts: {
+                    [PIIEntityType.PERSON_NAME]: 3,
+                    [PIIEntityType.EMAIL_ADDRESS]: 1,
+                    [PIIEntityType.PHONE_NUMBER]: 1,
+                    [PIIEntityType.ADDRESS]: 1,
+                    [PIIEntityType.BANK_ACCOUNT]: 2,
+                    [PIIEntityType.DATE_OF_BIRTH]: 2,
+                    [PIIEntityType.CREDIT_CARD_NUMBER]: 0,
+                    [PIIEntityType.SSN_SIN]: 0,
+                },
+            },
+            warnings: MOCK_WARNINGS,
+            clauses: [],
+            issues: [],
+        },
+        scrubbledDocumentText: MOCK_SCRUBBLED_TEXT,
+        pageTexts: MOCK_PAGE_TEXTS,
+        errors: MOCK_WARNINGS,
+        currentNode: "classify",
+        retryCounters: {},
+    };
+
+    return { auditId, state };
+}

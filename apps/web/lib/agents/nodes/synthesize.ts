@@ -62,9 +62,9 @@ export async function synthesizeNode(state: AgentState): Promise<Partial<AgentSt
 
     // 2. Gate low-confidence clauses before synthesizing
     //    (filters clauses below the confidence threshold for summary context)
-    const gateResult = gateConfidence(clauses);
-    if (gateResult.warnings.length > 0) {
-        for (const w of gateResult.warnings) {
+    const gateResult = gateConfidence(clauses, issues);
+    if (gateResult.demotedWarnings.length > 0) {
+        for (const w of gateResult.demotedWarnings) {
             warnings.push(w);
         }
     }
@@ -75,6 +75,7 @@ export async function synthesizeNode(state: AgentState): Promise<Partial<AgentSt
         audit: {
             ...state.audit,
             clauses: gateResult.passedClauses,
+            issues: gateResult.passedIssues,
         },
     };
 
@@ -112,8 +113,8 @@ export async function synthesizeNode(state: AgentState): Promise<Partial<AgentSt
         });
 
         // Fallback summary — constructed deterministically
-        const criticalCount = issues.filter((i) => i.severity === SeverityLevel.CRITICAL).length;
-        const highCount = issues.filter((i) => i.severity === SeverityLevel.HIGH).length;
+        const criticalCount = gateResult.passedIssues.filter((i) => i.severity === SeverityLevel.CRITICAL).length;
+        const highCount = gateResult.passedIssues.filter((i) => i.severity === SeverityLevel.HIGH).length;
         executiveSummary =
             `This ${state.audit.contractType?.replace(/_/g, " ") ?? "financial"} contract ` +
             `was analysed. ${issues.length} issue(s) were identified ` +

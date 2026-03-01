@@ -108,11 +108,16 @@ export async function validateAndIngest(
 
     // ─── STEP 1: Validate upload (magic bytes, size, MIME) ───────────────────
     const validation = validateUpload(req);
-    if (!validation.valid) {
+
+    if (!validation.valid && "errorCode" in validation) {
         throw new IngestionError(
-            validation.errorCode,
-            validation.errorMessage
+            validation.errorCode as string,
+            (validation as any).errorMessage as string
         );
+    }
+
+    if (!validation.valid || !("fileBuffer" in validation)) {
+        throw new IngestionError("VALIDATION_FAILED", "Invalid upload");
     }
 
     const { fileBuffer } = validation;
@@ -120,7 +125,7 @@ export async function validateAndIngest(
     const documentHash = hashBuffer(fileBuffer);
 
     // ─── STEP 2: Create initial Audit record ─────────────────────────────────
-    await prisma.audit.create({
+    await (prisma as any).audit.create({
         data: {
             auditId,
             status: AuditStatus.UPLOADING,
@@ -134,7 +139,7 @@ export async function validateAndIngest(
     try {
         documentUrl = await storeDocument(auditId, fileBuffer, req.mimeType);
     } catch (err) {
-        await prisma.audit.update({
+        await (prisma as any).audit.update({
             where: { auditId },
             data: { status: AuditStatus.FAILED },
         });
@@ -145,7 +150,7 @@ export async function validateAndIngest(
         );
     }
 
-    await prisma.audit.update({
+    await (prisma as any).audit.update({
         where: { auditId },
         data: { documentUrl },
     });
@@ -155,7 +160,7 @@ export async function validateAndIngest(
     try {
         pageTexts = await extractText(fileBuffer, req.mimeType, warnings);
     } catch (err) {
-        await prisma.audit.update({
+        await (prisma as any).audit.update({
             where: { auditId },
             data: { status: AuditStatus.FAILED },
         });
@@ -169,7 +174,7 @@ export async function validateAndIngest(
     const fullText = buildFullText(pageTexts);
 
     // ─── STEP 5: Scrub PII (HARD FAIL if Presidio is down) ───────────────────
-    await prisma.audit.update({
+    await (prisma as any).audit.update({
         where: { auditId },
         data: { status: AuditStatus.PII_SCRUBBING },
     });
@@ -179,7 +184,7 @@ export async function validateAndIngest(
         scrubResult = await scrubPII(fullText, pageTexts, warnings);
     } catch (err) {
         const isPIIFail = err instanceof PIIServiceUnavailableError;
-        await prisma.audit.update({
+        await (prisma as any).audit.update({
             where: { auditId },
             data: { status: AuditStatus.FAILED },
         });
@@ -199,7 +204,7 @@ export async function validateAndIngest(
     try {
         encryptedPiiMap = encryptPIIMap(piiMap);
     } catch (err) {
-        await prisma.audit.update({
+        await (prisma as any).audit.update({
             where: { auditId },
             data: { status: AuditStatus.FAILED },
         });
@@ -210,7 +215,7 @@ export async function validateAndIngest(
         );
     }
 
-    await prisma.pIIRecord.create({
+    await (prisma as any).pIIRecord.create({
         data: {
             auditId,
             encryptedPiiMap,
@@ -232,7 +237,7 @@ export async function validateAndIngest(
     );
 
     // ─── STEP 8: Persist scrubbed text and update Audit record ───────────────
-    await prisma.audit.update({
+    await (prisma as any).audit.update({
         where: { auditId },
         data: {
             status: AuditStatus.CLASSIFYING, // Ready for the agents pipeline
@@ -286,11 +291,12 @@ export async function validateAndIngest(
 export async function getProcessedState(
     auditId: string
 ): Promise<AgentState | null> {
-    const audit = await prisma.audit.findUnique({
+    const auditRecord = await (prisma as any).audit.findUnique({
         where: { auditId },
     });
 
-    if (!audit) return null;
+    if (!auditRecord) return null;
+    const audit = auditRecord as any;
 
     // Reconstruct pageTexts from stored JSON
     let pageTexts: AgentState["pageTexts"] = [];

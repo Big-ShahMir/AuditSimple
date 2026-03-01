@@ -9,24 +9,8 @@
 //   NODE_PROGRESS              — pipeline-stage → percent mapping
 // ============================================================
 
-import type { AgentState } from "@auditsimple/types";
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-export interface ProgressEvent {
-    /** The audit this event belongs to */
-    auditId: string;
-    /** Current node name */
-    node: string;
-    /** Pipeline completion percentage (0–100) */
-    percent: number;
-    /** Human-readable status message */
-    message: string;
-    /** ISO 8601 timestamp */
-    timestamp: string;
-}
+import type { AgentState, ProgressEvent } from "@auditsimple/types";
+import { AuditStatus } from "@auditsimple/types";
 
 // ---------------------------------------------------------------------------
 // Progress percentage map (per SPEC)
@@ -121,7 +105,10 @@ function getRedisClient() {
  * This function is fire-and-forget — never awaited by the node itself so it
  * does not add to pipeline latency.
  */
-export function emitProgress(state: AgentState, event: Partial<ProgressEvent>): void {
+export function emitProgress(
+    state: AgentState,
+    event: { node?: string; percent?: number; message?: string }
+): void {
     const auditId = state.audit?.auditId;
     if (!auditId) return;
 
@@ -130,11 +117,10 @@ export function emitProgress(state: AgentState, event: Partial<ProgressEvent>): 
     const message = event.message ?? NODE_MESSAGES[node] ?? "Processing…";
 
     const progressEvent: ProgressEvent = {
-        auditId,
-        node,
-        percent,
+        type: "status_change",
+        status: state.audit?.status ?? AuditStatus.CLASSIFYING,
+        progress: percent,
         message,
-        timestamp: new Date().toISOString(),
     };
 
     const payload = JSON.stringify(progressEvent);

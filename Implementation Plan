@@ -1,0 +1,140 @@
+# Agents Module: LangGraph Pipeline
+
+The `lib/agents` module is the orchestration core of AuditSimple. It defines a LangGraph.js state machine that drives PII-scrubbed document text through a 7-node deterministic pipeline: `classify → extract_clauses → validate_clauses → benchmark → calculate_cost → generate_citations → synthesize`.
+
+## User Review Required
+
+> [!IMPORTANT]
+> **`@langchain/langgraph` is not in `package.json`**. It needs to be added as a dependency. The package provides `StateGraph`, `START`, `END`, and the `Annotation` channel schema utilities. I will add it to `package.json`.
+
+> [!NOTE]
+> There are no existing tests in the `apps/web` project. The verification plan is TypeScript compilation + manual code review against SPEC constraints.
+
+---
+
+## Proposed Changes
+
+### Infrastructure
+
+#### [MODIFY] [package.json](file:///c:/Users/shahm/Desktop/Per.%20Proj/WealthSimple/AuditSimple/apps/web/package.json)
+Add `"@langchain/langgraph": "^0.2"` to `dependencies`.
+
+---
+
+#### [NEW] [state.ts](file:///c:/Users/shahm/Desktop/Per.%20Proj/WealthSimple/AuditSimple/apps/web/lib/agents/state.ts)
+- Exports `createInitialState(scrubbledText, pageTexts, auditId): AgentState`
+- Exports LangGraph `AgentStateAnnotation` channel schema using `Annotation.Root()` — each field uses identity reducer except `errors` (which appends) and `retryCounters` (which merges).
+
+#### [NEW] [retry.ts](file:///c:/Users/shahm/Desktop/Per.%20Proj/WealthSimple/AuditSimple/apps/web/lib/agents/retry.ts)
+- Exports `withRetry(nodeFn, policy): wrappedNodeFn` 
+- Backoff schedule: `[1000, 3000, 8000]ms`
+- Retry whitelist: `overloaded_error`, `api_error`, `timeout`, `rate_limit_error`
+- Never retries on: validation failures, confidence-below-threshold
+
+#### [NEW] [progress.ts](file:///c:/Users/shahm/Desktop/Per.%20Proj/WealthSimple/AuditSimple/apps/web/lib/agents/progress.ts)
+- Exports `emitProgress(state, event): void`
+- `NODE_PROGRESS` map: classify=15, extract_clauses=40, validate_clauses=50, benchmark=65, calculate_cost=75, generate_citations=85, synthesize=95, complete/failed=100
+- Writes to Redis for SSE pickup (gracefully no-ops if Redis is unavailable)
+- Exports `ProgressEvent` type
+
+#### [NEW] [prompts.ts](file:///c:/Users/shahm/Desktop/Per.%20Proj/WealthSimple/AuditSimple/apps/web/lib/agents/prompts.ts)
+- Every system prompt includes the anti-hallucination invariant: `"If you cannot find information in the provided document, respond with null. Do not infer, guess, or fabricate values."`
+- `buildClassifyPrompt(scrubbledText): { system, user }`
+- `buildExtractPrompt(scrubbledText, templates): { system, user, tools }` — generates the Anthropic tool schema from `ClauseTemplate[]`
+- `buildSynthesizePrompt(state): { system, user }` — passes full audit context, instructs ≤300 word plain-language summary
+
+---
+
+### Nodes
+
+#### [NEW] [nodes/classify.ts](file:///c:/Users/shahm/Desktop/Per.%20Proj/WealthSimple/AuditSimple/apps/web/lib/agents/nodes/classify.ts)
+- No LLM retries in the node itself — `graph.ts` wraps it with `withRetry`
+- Claude call: `temperature: 0.0`, `max_tokens: 200`, structured JSON output, 15s timeout
+- Returns `ContractType` enum value + confidence
+- If confidence < 0.6 → sets `UNKNOWN`, appends `AuditWarning`
+- Returns `Partial<AgentState>`: `{ audit: { contractType }, currentNode: "classify" }`
+
+#### [NEW] [nodes/extract-clauses.ts](file:///c:/Users/shahm/Desktop/Per.%20Proj/WealthSimple/AuditSimple/apps/web/lib/agents/nodes/extract-clauses.ts)
+- Uses `EXTRACTION_TEMPLATES[state.audit.contractType]` from `lib/analysis`
+- Claude call: `temperature: 0.0`, `max_tokens: 4000`, tool-use mode, 60s timeout
+- Instructs LLM to return `null` for unfound clauses (per spec)
+- Assigns `clauseId` (UUID v4), stub `SourceLocation` (page 1, full-page bounding box, verbatimText from rawValue)
+- Returns `Partial<AgentState>`: `{ audit: { clauses } }`
+
+#### [NEW] [nodes/validate-clauses.ts](file:///c:/Users/shahm/Desktop/Per.%20Proj/WealthSimple/AuditSimple/apps/web/lib/agents/nodes/validate-clauses.ts)
+- **No LLM call**
+- Imports `validateClause` from `lib/analysis`
+- Runs all rules; on failure: downgrades `extractionConfidence` to `0.3`, appends `AuditWarning`
+- Never removes clauses
+- Returns `Partial<AgentState>`: `{ audit: { clauses: updatedClauses }, errors: [...warnings] }`
+
+#### [NEW] [nodes/benchmark.ts](file:///c:/Users/shahm/Desktop/Per.%20Proj/WealthSimple/AuditSimple/apps/web/lib/agents/nodes/benchmark.ts)
+- Imports `getBenchmarkForClause` from `lib/benchmarks`
+- Imports `buildAuditIssue`, `assignSeverity` from `lib/analysis`
+- For each clause with `numericValue != null`: calls `getBenchmarkForClause()`
+- If lookup fails → appends warning, skips (never fails pipeline)
+- Creates `AuditIssue` for UNFAVORABLE deviations; sorts issues by severity DESC
+- Returns `Partial<AgentState>`: `{ audit: { issues } }`
+
+#### [NEW] [nodes/calculate-cost.ts](file:///c:/Users/shahm/Desktop/Per.%20Proj/WealthSimple/AuditSimple/apps/web/lib/agents/nodes/calculate-cost.ts)
+- **No LLM call**
+- Imports `calculateCostOfLoyalty` from `lib/analysis`
+- Extracts `termMonths` from clause with label `term_length` or `amortization_period` or `lease_term`
+- Extracts `principal` from clause with label `principal_amount`
+- Calls `calculateCostOfLoyalty(issues, termMonths, principal)`
+- Returns `Partial<AgentState>`: `{ audit: { costOfLoyalty } }`
+
+#### [NEW] [nodes/generate-citations.ts](file:///c:/Users/shahm/Desktop/Per.%20Proj/WealthSimple/AuditSimple/apps/web/lib/agents/nodes/generate-citations.ts)
+- Imports `verifyCitations` from `lib/citations`
+- Calls `verifyCitations(audit.clauses, pageTexts)`
+- Clauses failing all 3 tiers: `extractionConfidence *= 0.4` (applied by the citations module itself)
+- Merges citation warnings into state errors
+- Returns `Partial<AgentState>`: `{ audit: { clauses: verifiedClauses }, errors: [...citationWarnings] }`
+
+#### [NEW] [nodes/synthesize.ts](file:///c:/Users/shahm/Desktop/Per.%20Proj/WealthSimple/AuditSimple/apps/web/lib/agents/nodes/synthesize.ts)
+- Imports `gateConfidence` from `lib/citations` to filter low-confidence clauses from summary context
+- **Risk score is deterministic** (no LLM): uses `SEVERITY_WEIGHTS` formula from spec
+- Claude call: `temperature: 0.3`, `max_tokens: 1000`, free text, 30s timeout
+- System prompt constrains output to ≤300 words plain language
+- Returns `Partial<AgentState>`: `{ audit: { executiveSummary, riskScore, status: COMPLETE, completedAt } }`
+
+---
+
+### State Machine + Integration
+
+#### [NEW] [graph.ts](file:///c:/Users/shahm/Desktop/Per.%20Proj/WealthSimple/AuditSimple/apps/web/lib/agents/graph.ts)
+- Registers all nodes with `StateGraph`
+- Wraps `classify` and `extract_clauses` with `withRetry` per the `TRANSITIONS` map
+- Uses conditional edges for retry routing (`classify_retry`, `extract_retry`)
+- Remaining nodes route linearly (onError → next node, graceful degradation)
+- Exports single `runAuditPipeline(initialState: AgentState): Promise<AgentState>`
+
+#### [NEW] [mock.ts](file:///c:/Users/shahm/Desktop/Per.%20Proj/WealthSimple/AuditSimple/apps/web/lib/agents/mock.ts)
+- Exports `runMockPipeline(auditId: string): Promise<AgentState>`
+- Returns realistic fake data: 1 mortgage contract, 3+ clauses, 2+ issues, cost of loyalty
+- 500ms artificial delays per node to simulate pipeline behavior
+- Useful for frontend development and testing without LLM API keys
+
+#### [NEW] [index.ts](file:///c:/Users/shahm/Desktop/Per.%20Proj/WealthSimple/AuditSimple/apps/web/lib/agents/index.ts)
+- Barrel export: `runAuditPipeline`, `runMockPipeline`, `createInitialState`, `emitProgress`, `ProgressEvent`
+
+---
+
+## Verification Plan
+
+### Automated Tests
+```bash
+# TypeScript compilation check (run from apps/web directory)
+cd "c:\Users\shahm\Desktop\Per. Proj\WealthSimple\AuditSimple\apps\web"
+npx tsc --noEmit --skipLibCheck
+```
+
+### Manual SPEC Constraint Verification
+After implementation, I will verify:
+1. Every system prompt contains the anti-hallucination invariant string
+2. `classify` uses `temperature: 0.0`, `max_tokens: 200`; `extract_clauses` uses `temperature: 0.0`, `max_tokens: 4000`; `synthesize` uses `temperature: 0.3`, `max_tokens: 1000`
+3. `validate-clauses.ts` and `calculate-cost.ts` make zero Anthropic API calls
+4. No file in `lib/agents/` imports from `lib/ingestion` or `app/`
+5. All nodes return `Partial<AgentState>` — never mutate state directly
+6. `retry.ts` only retries on whitelisted error codes
+7. `graph.ts` is the sole entry point (`runAuditPipeline`)

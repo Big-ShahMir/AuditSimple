@@ -324,6 +324,13 @@ export interface AuditStatusResponse {
     estimatedSecondsRemaining: number | null;
 }
 
+export type ProgressEvent =
+    | { type: "status_change"; status: AuditStatus; progress: number; message?: string }
+    | { type: "clause_found"; clause: ExtractedClause }
+    | { type: "issue_flagged"; issue: AuditIssue }
+    | { type: "error"; warning: AuditWarning }
+    | { type: "complete" };
+
 export interface AuditResultResponse {
     audit: ContractAudit;
     /** Pre-signed URL to view original document (time-limited) */

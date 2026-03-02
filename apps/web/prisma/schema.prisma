@@ -13,6 +13,56 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ── Audit ──────────────────────────────────────────────────────────────────
+// Central entity. Created by lib/ingestion/index.ts during upload and
+// progressively updated by the analysis pipeline (lib/agents).
+// JSON fields (clauses, issues, etc.) are stored as TEXT because Prisma's
+// PostgreSQL provider maps String → text, which is sufficient for all sizes.
+
+model Audit {
+  auditId          String    @id @default(uuid())
+  status           String    // AuditStatus enum value
+  originalFileName String
+  documentHash     String
+  documentUrl      String?   // Set after Vercel Blob upload
+  mimeType         String?   // Stored for document URL reconstruction
+
+  // Set after PII scrubbing
+  scrubbledText    String?
+  pageTextsJson    String?   // JSON: AgentState["pageTexts"]
+  totalPiiRedacted Int?
+  entityTypeCounts String?   // JSON: Record<PIIEntityType, number>
+
+  // Set after pipeline completes
+  contractType     String?   // ContractType enum value
+  riskScore        Int?
+  executiveSummary String?
+  clauses          String?   // JSON: ExtractedClause[]
+  issues           String?   // JSON: AuditIssue[]
+  costOfLoyalty    String?   // JSON: CostOfLoyalty
+  warnings         String?   // JSON: AuditWarning[]
+
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  completedAt      DateTime?
+
+  piiRecord        PIIRecord?
+}
+
+// ── PIIRecord ───────────────────────────────────────────────────────────────
+// Stores the AES-256-GCM encrypted PII map. One record per audit.
+// The plaintext piiMap never appears outside lib/ingestion.
+
+model PIIRecord {
+  id              String @id @default(uuid())
+  auditId         String @unique
+  encryptedPiiMap Bytes
+
+  audit           Audit  @relation(fields: [auditId], references: [auditId])
+}
+
+// ── BenchmarkRate ───────────────────────────────────────────────────────────
+
 model BenchmarkRate {
   id           String   @id @default(uuid())
   sourceName   String

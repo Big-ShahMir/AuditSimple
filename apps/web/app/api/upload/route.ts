@@ -18,7 +18,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { validateAndIngest } from "@/lib/ingestion";
-//import { runAuditPipeline } from "@/lib/agents";
+import { runAuditPipeline } from "@/lib/agents";
 import { runMockPipeline } from "@/lib/agents";
 import { AuditStatus } from "@auditsimple/types";
 import type { AgentState } from "@auditsimple/types";
@@ -99,8 +99,10 @@ export async function POST(request: NextRequest) {
     // runAuditPipeline executes the full LangGraph state machine.
     // Progress events are written to Redis by lib/agents/progress.ts
     // as each node completes — the SSE stream route reads those events.
-    //void runAuditPipeline(state)
-    void runMockPipeline(auditId)
+    const useMock = process.env.USE_MOCK_PIPELINE === "true";
+    const pipelinePromise = useMock ? runMockPipeline(auditId) : runAuditPipeline(state);
+
+    void pipelinePromise
         .then(async (finalState) => {
             const isComplete =
                 finalState.audit?.status === AuditStatus.COMPLETE;

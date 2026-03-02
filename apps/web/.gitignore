@@ -3,3 +3,6 @@ node_modules
 .env
 
 /generated/prisma
+
+# Local document storage (dev fallback when BLOB_READ_WRITE_TOKEN is not set)
+/uploads/

@@ -94,7 +94,7 @@ export function buildClassifyPrompt(scrubbledText: string): ClassifyPromptResult
 // }
 // ────────────────────────────────────────────────────────────────────────────
 
-// OpenAI-compatible tool format (used by NVIDIA NIM / Qwen3.5-397B)
+// OpenAI-compatible tool format (used by NVIDIA NIM / DeepSeek V3.2)
 export interface OpenAITool {
     type: "function";
     function: {
@@ -171,7 +171,7 @@ export function buildExtractPrompt(
     // }));
     // ─────────────────────────────────────────────────────────────────────────
 
-    // OpenAI-compatible tool schema (NVIDIA NIM / Qwen3.5-397B)
+    // OpenAI-compatible tool schema (NVIDIA NIM / DeepSeek V3.2)
     const tools: OpenAITool[] = templates.map((template) => ({
         type: "function" as const,
         function: {

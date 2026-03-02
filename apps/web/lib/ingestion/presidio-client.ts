@@ -137,12 +137,14 @@ export async function analyzeText(
     text: string,
     language = "en"
 ): Promise<PresidioEntity[]> {
-    const result = await presidioPost<PresidioEntity[]>("/analyze", {
+    const raw = await presidioPost<PresidioEntity[] | { results: PresidioEntity[] }>("/analyze", {
         text,
         language,
         entities: PRESIDIO_ENTITIES,
         return_decision_process: false,
     });
+    // Custom sidecar wraps entities in { results: [...] }; standard Presidio returns a bare array
+    const result = Array.isArray(raw) ? raw : (raw as { results: PresidioEntity[] }).results;
 
     // Log only counts and types — NEVER the text content
     console.info(

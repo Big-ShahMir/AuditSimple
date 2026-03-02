@@ -19,6 +19,7 @@ import type {
 } from "@auditsimple/types";
 import { AuditStatus, ContractType, SeverityLevel } from "@auditsimple/types";
 import { createInitialState } from "./state";
+import { emitProgress, emitRichEvent } from "./progress";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -93,6 +94,7 @@ export async function runMockPipeline(auditId: string): Promise<AgentState> {
     // ------------------------------------------------------------------ //
     //  Node: classify (15%)                                               //
     // ------------------------------------------------------------------ //
+    emitProgress(state, { node: "classify" });
     await delay(500);
     state.currentNode = "classify";
     state.audit.contractType = ContractType.MORTGAGE;
@@ -102,6 +104,7 @@ export async function runMockPipeline(auditId: string): Promise<AgentState> {
     // ------------------------------------------------------------------ //
     //  Node: extract_clauses (40%)                                        //
     // ------------------------------------------------------------------ //
+    emitProgress(state, { node: "extract_clauses" });
     await delay(500);
     state.currentNode = "extract_clauses";
 
@@ -159,11 +162,15 @@ export async function runMockPipeline(auditId: string): Promise<AgentState> {
     };
 
     state.audit.clauses = [interestRateClause, prepaymentPenaltyClause, termLengthClause];
+    emitRichEvent(state.audit.auditId, { type: "clause_found", clause: interestRateClause });
+    emitRichEvent(state.audit.auditId, { type: "clause_found", clause: prepaymentPenaltyClause });
+    emitRichEvent(state.audit.auditId, { type: "clause_found", clause: termLengthClause });
     state.audit.updatedAt = now();
 
     // ------------------------------------------------------------------ //
     //  Node: validate_clauses (50%)                                       //
     // ------------------------------------------------------------------ //
+    emitProgress(state, { node: "validate_clauses" });
     await delay(500);
     state.currentNode = "validate_clauses";
     // All mock clauses pass validation — no confidence downgrades needed
@@ -172,6 +179,7 @@ export async function runMockPipeline(auditId: string): Promise<AgentState> {
     // ------------------------------------------------------------------ //
     //  Node: benchmark (65%)                                              //
     // ------------------------------------------------------------------ //
+    emitProgress(state, { node: "benchmark" });
     await delay(500);
     state.currentNode = "benchmark";
 
@@ -221,12 +229,15 @@ export async function runMockPipeline(auditId: string): Promise<AgentState> {
     };
 
     state.audit.issues = [rateIssue, penaltyIssue];
+    emitRichEvent(state.audit.auditId, { type: "issue_flagged", issue: rateIssue });
+    emitRichEvent(state.audit.auditId, { type: "issue_flagged", issue: penaltyIssue });
     state.audit.status = AuditStatus.BENCHMARKING;
     state.audit.updatedAt = now();
 
     // ------------------------------------------------------------------ //
     //  Node: calculate_cost (75%)                                         //
     // ------------------------------------------------------------------ //
+    emitProgress(state, { node: "calculate_cost" });
     await delay(500);
     state.currentNode = "calculate_cost";
 
@@ -255,6 +266,7 @@ export async function runMockPipeline(auditId: string): Promise<AgentState> {
     // ------------------------------------------------------------------ //
     //  Node: generate_citations (85%)                                     //
     // ------------------------------------------------------------------ //
+    emitProgress(state, { node: "generate_citations" });
     await delay(500);
     state.currentNode = "generate_citations";
     // Mock: all clauses pass citation verification — source locations unchanged
@@ -264,6 +276,7 @@ export async function runMockPipeline(auditId: string): Promise<AgentState> {
     // ------------------------------------------------------------------ //
     //  Node: synthesize (95%)                                             //
     // ------------------------------------------------------------------ //
+    emitProgress(state, { node: "synthesize" });
     await delay(500);
     state.currentNode = "synthesize";
     const completedAt = now();
@@ -279,6 +292,7 @@ export async function runMockPipeline(auditId: string): Promise<AgentState> {
     // ------------------------------------------------------------------ //
     //  Node: complete (100%)                                              //
     // ------------------------------------------------------------------ //
+    emitProgress(state, { node: "complete" });
     await delay(500);
     state.currentNode = "complete";
 

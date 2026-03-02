@@ -11,6 +11,7 @@
 
 import type { AgentState, ProgressEvent } from "@auditsimple/types";
 import { AuditStatus } from "@auditsimple/types";
+import { pubSub, bufferEvent } from "@/lib/pubsub";
 
 // ---------------------------------------------------------------------------
 // Progress percentage map (per SPEC)
@@ -107,7 +108,7 @@ function getRedisClient() {
  */
 export function emitProgress(
     state: AgentState,
-    event: { node?: string; percent?: number; message?: string }
+    event: { node?: string; percent?: number; message?: string; status?: AuditStatus }
 ): void {
     const auditId = state.audit?.auditId;
     if (!auditId) return;
@@ -118,7 +119,7 @@ export function emitProgress(
 
     const progressEvent: ProgressEvent = {
         type: "status_change",
-        status: state.audit?.status ?? AuditStatus.CLASSIFYING,
+        status: event.status ?? state.audit?.status ?? AuditStatus.CLASSIFYING,
         progress: percent,
         message,
     };
@@ -126,12 +127,43 @@ export function emitProgress(
     const payload = JSON.stringify(progressEvent);
     const key = `audit:progress:${auditId}`;
 
-    // Fire-and-forget — errors are silently swallowed
+    // Buffer locally so late-connecting SSE clients can replay history
+    bufferEvent(key, payload);
+
+    // Always emit locally (in-process fallback for when Redis is absent)
+    pubSub.emit(key, payload);
+
+    // Also write to Redis if configured — fire-and-forget
     void getRedisClient().then((redis) => {
         if (!redis) return;
         return Promise.all([
             redis.set(key, payload, { ex: 3600 }),
             redis.publish(key, payload),
         ]);
+    });
+}
+
+/**
+ * Emits an arbitrary ProgressEvent (clause_found, issue_flagged, etc.)
+ * to the in-process pubSub and optionally to Redis.
+ *
+ * Unlike emitProgress(), does NOT update the snapshot key in Redis — only
+ * publishes to the pub/sub channel so real-time listeners receive it.
+ */
+export function emitRichEvent(auditId: string, event: ProgressEvent): void {
+    if (!auditId) return;
+    const payload = JSON.stringify(event);
+    const key = `audit:progress:${auditId}`;
+
+    // Buffer locally so late-connecting SSE clients can replay history
+    bufferEvent(key, payload);
+
+    // Always emit locally
+    pubSub.emit(key, payload);
+
+    // Also publish to Redis if configured — fire-and-forget
+    void getRedisClient().then((redis) => {
+        if (!redis) return;
+        redis.publish(key, payload);
     });
 }

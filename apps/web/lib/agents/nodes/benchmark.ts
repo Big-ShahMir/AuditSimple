@@ -12,7 +12,7 @@ import type { AgentState, ExtractedClause, AuditIssue, AuditWarning } from "@aud
 import { AuditStatus, SeverityLevel } from "@auditsimple/types";
 import { getBenchmarkForClause } from "@/lib/benchmarks";
 import { assignSeverity, buildAuditIssue } from "@/lib/analysis";
-import { emitProgress } from "../progress";
+import { emitProgress, emitRichEvent } from "../progress";
 
 // ---------------------------------------------------------------------------
 // Severity sort order
@@ -134,6 +134,10 @@ export async function benchmarkNode(state: AgentState): Promise<Partial<AgentSta
     const sortedIssues = [...issues].sort(
         (a, b) => SEVERITY_ORDER[b.severity] - SEVERITY_ORDER[a.severity],
     );
+
+    for (const issue of sortedIssues) {
+        emitRichEvent(state.audit.auditId!, { type: "issue_flagged", issue });
+    }
 
     return {
         currentNode: "benchmark",

@@ -17,7 +17,7 @@ import { gateConfidence } from "@/lib/citations";
 import { buildSynthesizePrompt } from "../prompts";
 import { emitProgress } from "../progress";
 
-// NVIDIA NIM — OpenAI-compatible endpoint hosting MiniMax M2.5
+// NVIDIA NIM — OpenAI-compatible endpoint hosting DeepSeek V3.2
 const nvidia = new OpenAI({
     apiKey: process.env.NVIDIA_API_KEY ?? "",
     baseURL: "https://integrate.api.nvidia.com/v1",
@@ -112,10 +112,10 @@ export async function synthesizeNode(state: AgentState): Promise<Partial<AgentSt
         // }
         // ─────────────────────────────────────────────────────────────────────
 
-        // NVIDIA NIM — MiniMax M2.5
+        // NVIDIA NIM — DeepSeek V3.2
         const response = await nvidia.chat.completions.create(
             {
-                model: "minimaxai/minimax-m2.5",
+                model: "deepseek-ai/deepseek-v3.2",
                 max_tokens: 1000,
                 temperature: 0.3,
                 messages: [

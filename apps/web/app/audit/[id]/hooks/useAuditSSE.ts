@@ -5,6 +5,7 @@ export function useAuditSSE(auditId: string) {
     const [events, setEvents] = useState<ProgressEvent[]>([]);
     const [status, setStatus] = useState<AuditStatus>("UPLOADING" as AuditStatus);
     const [isConnected, setIsConnected] = useState(false);
+    const [hasConnected, setHasConnected] = useState(false);
     const retryRef = useRef(0);
 
     useEffect(() => {
@@ -18,7 +19,10 @@ export function useAuditSSE(auditId: string) {
             es = new EventSource(`/api/audit/${auditId}/stream`);
 
             es.onopen = () => {
-                if (isMounted) setIsConnected(true);
+                if (isMounted) {
+                    setHasConnected(true);
+                    setIsConnected(true);
+                }
             };
 
             es.onmessage = (event) => {
@@ -29,6 +33,10 @@ export function useAuditSSE(auditId: string) {
 
                     if (data.type === "status_change") {
                         setStatus(data.status);
+                        if (data.status === AuditStatus.FAILED || data.status === AuditStatus.COMPLETE) {
+                            es?.close();
+                            setIsConnected(false);
+                        }
                     }
                     if (data.type === "complete") {
                         es?.close();
@@ -68,5 +76,5 @@ export function useAuditSSE(auditId: string) {
         .map((e) => e as { type: "status_change", status: AuditStatus, progress: number })
         .at(-1)?.progress ?? 0;
 
-    return { events, progress, status, isConnected };
+    return { events, progress, status, isConnected, hasConnected };
 }

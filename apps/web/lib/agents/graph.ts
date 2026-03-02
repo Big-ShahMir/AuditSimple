@@ -109,7 +109,7 @@ function routeAfterExtractClauses(state: AgentState): "validate_clauses" | "fail
  * warnings into audit.warnings for persistence.
  */
 async function failedNode(state: AgentState): Promise<Partial<AgentState>> {
-    emitProgress(state, { node: "failed" });
+    emitProgress(state, { node: "failed", status: AuditStatus.FAILED });
     const completedAt = new Date().toISOString();
     return {
         currentNode: "failed",

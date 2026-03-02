@@ -4,7 +4,7 @@
 // Classification node — identifies the contract type from scrubbed text.
 //
 // LLM config: temperature 0.0, max_tokens 10000, timeout 30s, json_object mode
-// response_format json_object suppresses MiniMax's <think>…</think> preamble.
+// response_format json_object forces DeepSeek V3.2 to emit only valid JSON.
 // The <think> stripper + regex fallback remain as belt-and-suspenders in case
 // the NIM endpoint passes thinking tokens through in the content field.
 // Returns: ContractType + appends warning if confidence < 0.6
@@ -18,7 +18,7 @@ import { AuditStatus, ContractType } from "@auditsimple/types";
 import { buildClassifyPrompt } from "../prompts";
 import { emitProgress } from "../progress";
 
-// NVIDIA NIM — OpenAI-compatible endpoint hosting MiniMax M2.5
+// NVIDIA NIM — OpenAI-compatible endpoint hosting DeepSeek V3.2
 const nvidia = new OpenAI({
     apiKey: process.env.NVIDIA_API_KEY ?? "",
     baseURL: "https://integrate.api.nvidia.com/v1",
@@ -61,13 +61,13 @@ export async function classifyNode(state: AgentState): Promise<Partial<AgentStat
         // rawContent = firstBlock.text.trim();
         // ─────────────────────────────────────────────────────────────────────
 
-        // NVIDIA NIM — MiniMax M2.5
-        // response_format json_object: suppresses the <think>…</think> reasoning
-        // preamble and forces MiniMax to emit only valid JSON.
-        // max_tokens 10000: safety margin if thinking still appears in content.
+        // NVIDIA NIM — DeepSeek V3.2
+        // response_format json_object: suppresses any reasoning preamble and
+        // forces DeepSeek to emit only valid JSON.
+        // max_tokens 10000: safety margin.
         const response = await nvidia.chat.completions.create(
             {
-                model: "minimaxai/minimax-m2.5",
+                model: "deepseek-ai/deepseek-v3.2",
                 max_tokens: 10000,
                 temperature: 0.0,
                 response_format: { type: "json_object" },
@@ -80,14 +80,14 @@ export async function classifyNode(state: AgentState): Promise<Partial<AgentStat
         );
 
         const content = response.choices[0]?.message?.content ?? "";
-        // Strip <think>…</think> reasoning blocks that MiniMax emits before the answer
+        // Strip <think>…</think> reasoning blocks emitted before the answer
         rawContent = content.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
     } finally {
         clearTimeout(timer);
     }
 
     // Parse the JSON response.
-    // MiniMax may still wrap the JSON in surrounding text even after <think> removal,
+    // DeepSeek may still wrap the JSON in surrounding text even after <think> removal,
     // so fall back to extracting the first {...} block via regex.
     let parsed: { contractType: string; confidence: number };
     try {
@@ -95,12 +95,12 @@ export async function classifyNode(state: AgentState): Promise<Partial<AgentStat
     } catch {
         const match = rawContent.match(/\{[\s\S]*\}/);
         if (!match) {
-            throw new Error(`MiniMax returned non-JSON for classify: ${rawContent.slice(0, 300)}`);
+            throw new Error(`DeepSeek returned non-JSON for classify: ${rawContent.slice(0, 300)}`);
         }
         try {
             parsed = JSON.parse(match[0]);
         } catch {
-            throw new Error(`MiniMax returned non-JSON for classify: ${rawContent.slice(0, 300)}`);
+            throw new Error(`DeepSeek returned non-JSON for classify: ${rawContent.slice(0, 300)}`);
         }
     }
 

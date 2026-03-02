@@ -5,8 +5,8 @@ import * as pdfjsLib from "pdfjs-dist";
 import { SourceLocation } from "@auditsimple/types";
 import { CitationOverlay } from "./CitationOverlay";
 
-// Configure the worker for pdf.js utilizing local worker file rather than external CDN if needed
-pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+// Configure the worker for pdf.js utilizing external CDN for ES module compatibility (v4+)
+pdfjsLib.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
 
 interface PageRendererProps {
     pageNumber: number;

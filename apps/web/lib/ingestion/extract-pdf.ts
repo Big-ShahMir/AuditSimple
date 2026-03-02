@@ -11,6 +11,8 @@
 //   extractPdfStructured(fileBuffer: Buffer): Promise<PageText[]>
 // ============================================================
 
+import path from "path";
+import { pathToFileURL } from "url";
 import type { AgentState } from "@auditsimple/types";
 
 // ---------------------------------------------------------------------------
@@ -41,11 +43,12 @@ interface PdfTextMarkedContent {
 // pdfjs-dist requires a worker in browser environments; in Node we use the
 // legacy build which includes the worker inline.
 async function getPdfJs() {
-    // Dynamic import avoids issues in environments where pdfjs-dist isn't
-    // available at module load time (e.g., during test runs without the dep).
     const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-    // Disable the worker — not available in Node server-side
-    pdfjs.GlobalWorkerOptions.workerSrc = "";
+    // pdfjs-dist v4 requires a valid workerSrc — setting it to "" no longer works.
+    // In Node.js (Next.js API routes) we point directly to the bundled worker file.
+    pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(
+        path.join(process.cwd(), "node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs")
+    ).href;
     return pdfjs;
 }
 

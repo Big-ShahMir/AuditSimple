@@ -47,7 +47,7 @@ export function ErrorView({ auditId, warnings }: ErrorViewProps) {
 
                 <div className="space-y-4">
                     <button
-                        onClick={() => router.push("/audit")}
+                        onClick={() => router.push("/dashboard")}
                         className="px-6 py-3 rounded-md bg-slate-800 text-white font-medium hover:bg-slate-900 transition-all focus:outline-none focus:ring-2 focus:ring-slate-400 shadow-sm w-full sm:w-auto"
                     >
                         Try Again

@@ -16,9 +16,9 @@ import type { AgentState, ExtractedClause, AuditWarning, SourceLocation } from "
 import { AuditStatus, ContractType } from "@auditsimple/types";
 import { EXTRACTION_TEMPLATES } from "@/lib/analysis";
 import { buildExtractPrompt } from "../prompts";
-import { emitProgress } from "../progress";
+import { emitProgress, emitRichEvent } from "../progress";
 
-// NVIDIA NIM — OpenAI-compatible endpoint hosting MiniMax M2.5
+// NVIDIA NIM — OpenAI-compatible endpoint hosting DeepSeek V3.2
 const nvidia = new OpenAI({
     apiKey: process.env.NVIDIA_API_KEY ?? "",
     baseURL: "https://integrate.api.nvidia.com/v1",
@@ -98,13 +98,13 @@ export async function extractClausesNode(state: AgentState): Promise<Partial<Age
     // }
     // ─────────────────────────────────────────────────────────────────────────
 
-    // NVIDIA NIM — MiniMax M2.5 (OpenAI-compatible function calling)
+    // NVIDIA NIM — DeepSeek V3.2 (OpenAI-compatible function calling)
     let response: OpenAI.Chat.ChatCompletion;
     try {
         response = await nvidia.chat.completions.create(
             {
-                model: "minimaxai/minimax-m2.5",
-                max_tokens: 4000,
+                model: "deepseek-ai/deepseek-v3.2",
+                max_tokens: 6000,
                 temperature: 0.0,
                 messages: [
                     { role: "system", content: system },
@@ -191,6 +191,7 @@ export async function extractClausesNode(state: AgentState): Promise<Partial<Age
         }
 
         clauses.push(clause);
+        emitRichEvent(state.audit.auditId!, { type: "clause_found", clause });
     }
 
     if (clauses.length === 0) {

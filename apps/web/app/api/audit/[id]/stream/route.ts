@@ -24,6 +24,7 @@
 
 import { NextRequest } from "next/server";
 import { Redis } from "ioredis";
+import { pubSub, getEventHistory } from "@/lib/pubsub";
 
 const KEEP_ALIVE_MS = 20_000;
 
@@ -53,6 +54,7 @@ export async function GET(
         async start(controller) {
             let closed = false;
             let subscriber: Redis | null = null;
+            let localCleanup: (() => void) | null = null;
             let keepAliveTimer: ReturnType<typeof setInterval> | null = null;
 
             const send = (data: string) => {
@@ -69,6 +71,7 @@ export async function GET(
                 closed = true;
                 if (keepAliveTimer !== null) clearInterval(keepAliveTimer);
                 subscriber?.disconnect();
+                localCleanup?.();
                 try {
                     controller.close();
                 } catch {
@@ -89,22 +92,30 @@ export async function GET(
                 }
             }, KEEP_ALIVE_MS);
 
-            // ── No Redis configured ───────────────────────────────────────────
+            // ── No Redis: fall back to in-process EventEmitter ────────────────
             if (!redisUrl) {
-                send(
-                    JSON.stringify({
-                        type: "error",
-                        warning: {
-                            code: "REDIS_UNAVAILABLE",
-                            message:
-                                "Progress streaming is unavailable (REDIS_URL not configured).",
-                            recoverable: false,
-                            stage: "UPLOADING",
-                        },
-                    })
-                );
-                close();
-                return;
+                // Register listener FIRST so no new events are missed during replay.
+                const listener = (message: string) => {
+                    send(message);
+                    if (isTerminalEvent(message)) close();
+                };
+                pubSub.on(channel, listener);
+                localCleanup = () => pubSub.off(channel, listener);
+
+                // Replay buffered history so clients connecting after events
+                // were emitted still receive all pipeline steps.
+                const history = getEventHistory(channel);
+                for (const event of history) {
+                    send(event);
+                }
+
+                // If the pipeline already finished before this client connected,
+                // close immediately rather than waiting forever.
+                if (history.length > 0 && isTerminalEvent(history[history.length - 1])) {
+                    close();
+                }
+
+                return; // keep stream open; close() called on terminal event or client disconnect
             }
 
             try {

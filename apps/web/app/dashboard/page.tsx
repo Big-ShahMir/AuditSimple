@@ -47,7 +47,9 @@ export default function DashboardPage() {
 
     const handleFiles = useCallback((files: FileList | null) => {
         if (!files || files.length === 0) return;
-        upload(files[0]);
+        const file = files[0];                              // capture before reset — FileList is live
+        if (inputRef.current) inputRef.current.value = ""; // resetting empties the live FileList
+        upload(file);
     }, [upload]);
 
     const onDrop = useCallback((e: React.DragEvent) => {

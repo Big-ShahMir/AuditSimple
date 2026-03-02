@@ -2,18 +2,18 @@
 // apps/web/lib/ingestion/storage.ts
 // ============================================================
 // Object storage interface for raw uploaded documents.
-// Uses @vercel/blob for Vercel deployments.
+// Uses @vercel/blob in production (BLOB_READ_WRITE_TOKEN must be set).
+// Falls back to local filesystem storage in development so the pipeline
+// works without any cloud credentials.
 //
 // Key contract:
-//   - storeDocument: uploads the raw file, returns a blob URL
-//   - getDocumentUrl: returns a time-limited pre-signed URL for viewing
-//
-// AES-256 encryption at rest and 30-day TTL are enforced by Vercel Blob
-// when configured in the project settings. The blob key includes the auditId
-// so retrieval is deterministic.
+//   - storeDocument: uploads the raw file, returns a URL/path string
+//   - getDocumentUrl: returns the stored URL for a given auditId + mimeType
 // ============================================================
 
 import { put, head, type PutBlobResult } from "@vercel/blob";
+import fs from "fs";
+import path from "path";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -23,6 +23,9 @@ const BLOB_TOKEN = process.env.BLOB_READ_WRITE_TOKEN;
 
 /** Key prefix for all document blobs */
 const DOCUMENT_PREFIX = "documents";
+
+/** Local uploads directory (relative to the Next.js app root) */
+const LOCAL_UPLOADS_DIR = path.join(process.cwd(), "uploads");
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -51,22 +54,56 @@ function buildBlobKey(auditId: string, mimeType: string): string {
 // Public API
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Local filesystem fallback (used when BLOB_READ_WRITE_TOKEN is not set)
+// ---------------------------------------------------------------------------
+
+function localFilePath(auditId: string, mimeType: string): string {
+    const ext = mimeToExtension(mimeType);
+    return path.join(LOCAL_UPLOADS_DIR, auditId, `${auditId}.${ext}`);
+}
+
+async function storeDocumentLocally(
+    auditId: string,
+    fileBuffer: Buffer,
+    mimeType: string
+): Promise<string> {
+    const filePath = localFilePath(auditId, mimeType);
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, fileBuffer);
+    console.info(
+        `[storage] (local) Document stored at ${filePath}. ` +
+        `Size: ${fileBuffer.length} bytes, MIME: ${mimeType}`
+    );
+    return `local://uploads/${auditId}/${auditId}.${mimeToExtension(mimeType)}`;
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
 /**
- * Stores an uploaded document in Vercel Blob object storage.
+ * Stores an uploaded document.
+ * Uses Vercel Blob when BLOB_READ_WRITE_TOKEN is set (production).
+ * Falls back to local filesystem storage for local development.
  *
- * @param auditId    - The unique audit ID (used as blob key component).
+ * @param auditId    - The unique audit ID (used as storage key).
  * @param fileBuffer - Raw file bytes.
  * @param mimeType   - MIME type (already validated via magic bytes).
- * @returns The blob URL (publicly addressable within the Vercel project).
- * @throws If the Blob upload fails.
+ * @returns A URL or local path string identifying the stored file.
+ * @throws If the upload/write fails.
  */
 export async function storeDocument(
     auditId: string,
     fileBuffer: Buffer,
     mimeType: string
 ): Promise<string> {
-    const blobKey = buildBlobKey(auditId, mimeType);
+    // Local dev fallback — no Vercel credentials required
+    if (!BLOB_TOKEN) {
+        return storeDocumentLocally(auditId, fileBuffer, mimeType);
+    }
 
+    const blobKey = buildBlobKey(auditId, mimeType);
     let result: PutBlobResult;
     try {
         result = await put(blobKey, fileBuffer, {
@@ -85,41 +122,42 @@ export async function storeDocument(
         `[storage] Document stored for audit ${auditId}. ` +
         `Size: ${fileBuffer.length} bytes, MIME: ${mimeType}`
     );
-
     return result.url;
 }
 
 /**
  * Retrieves the URL for a previously stored document.
- * Vercel Blob public URLs don't expire, but callers should treat the URL
- * as ephemeral (e.g., wrap in a short-lived proxy for security).
  *
  * @param auditId  - The audit ID.
  * @param mimeType - The MIME type of the stored document.
- * @returns The blob URL for the document, or null if not found.
+ * @returns The URL/path for the document, or null if not found.
  */
 export async function getDocumentUrl(
     auditId: string,
     mimeType: string
 ): Promise<string | null> {
-    const blobKey = buildBlobKey(auditId, mimeType);
+    // Local dev fallback
+    if (!BLOB_TOKEN) {
+        const filePath = localFilePath(auditId, mimeType);
+        if (fs.existsSync(filePath)) {
+            return `local://uploads/${auditId}/${auditId}.${mimeToExtension(mimeType)}`;
+        }
+        return null;
+    }
 
+    const blobKey = buildBlobKey(auditId, mimeType);
     try {
-        // @vercel/blob's `head` fetches metadata for a blob by URL/key.
-        // We reconstruct the URL from environment config.
         const blobStoreUrl = process.env.BLOB_STORE_URL;
         if (!blobStoreUrl) {
             throw new Error(
                 "BLOB_STORE_URL environment variable is not set. Cannot reconstruct blob URL."
             );
         }
-
         const fullUrl = `${blobStoreUrl.replace(/\/$/, "")}/${blobKey}`;
         const metadata = await head(fullUrl, { token: BLOB_TOKEN });
         return metadata.url;
     } catch (err) {
         const errStr = String(err);
-        // Blob not found is a non-fatal case — return null so caller can handle it
         if (errStr.includes("not found") || errStr.includes("404")) {
             return null;
         }

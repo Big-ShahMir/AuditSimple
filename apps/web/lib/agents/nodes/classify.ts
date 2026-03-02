@@ -7,13 +7,20 @@
 // Returns: ContractType + appends warning if confidence < 0.6
 // ============================================================
 
-import Anthropic from "@anthropic-ai/sdk";
+// import Anthropic from "@anthropic-ai/sdk";        // ← Anthropic SDK (commented out)
+// const anthropic = new Anthropic();                 // ← Anthropic client (commented out)
+import OpenAI from "openai";
 import type { AgentState, AuditWarning } from "@auditsimple/types";
 import { AuditStatus, ContractType } from "@auditsimple/types";
 import { buildClassifyPrompt } from "../prompts";
 import { emitProgress } from "../progress";
 
-const anthropic = new Anthropic();
+// NVIDIA NIM — OpenAI-compatible endpoint hosting MiniMax M2.5
+const nvidia = new OpenAI({
+    apiKey: process.env.NVIDIA_API_KEY ?? "",
+    baseURL: "https://integrate.api.nvidia.com/v1",
+});
+
 const CLASSIFY_TIMEOUT_MS = 15_000;
 const LOW_CONFIDENCE_THRESHOLD = 0.6;
 
@@ -33,23 +40,40 @@ export async function classifyNode(state: AgentState): Promise<Partial<AgentStat
     let rawContent: string;
 
     try {
-        const response = await anthropic.messages.create(
+        // ── ANTHROPIC call (commented out) ───────────────────────────────────
+        // const response = await anthropic.messages.create(
+        //     {
+        //         model: "claude-3-5-haiku-20241022",
+        //         max_tokens: 200,
+        //         temperature: 0.0,
+        //         system,
+        //         messages: [{ role: "user", content: user }],
+        //     },
+        //     { signal: controller.signal },
+        // );
+        // const firstBlock = response.content[0];
+        // if (!firstBlock || firstBlock.type !== "text") {
+        //     throw new Error("Unexpected response structure from Claude (expected text block)");
+        // }
+        // rawContent = firstBlock.text.trim();
+        // ─────────────────────────────────────────────────────────────────────
+
+        // NVIDIA NIM — MiniMax M2.5
+        const response = await nvidia.chat.completions.create(
             {
-                model: "claude-3-5-haiku-20241022",
+                model: "minimaxai/minimax-m2.5",
                 max_tokens: 200,
                 temperature: 0.0,
-                system,
-                messages: [{ role: "user", content: user }],
+                messages: [
+                    { role: "system", content: system },
+                    { role: "user", content: user },
+                ],
             },
             { signal: controller.signal },
         );
 
-        // Extract text content from the first content block
-        const firstBlock = response.content[0];
-        if (!firstBlock || firstBlock.type !== "text") {
-            throw new Error("Unexpected response structure from Claude (expected text block)");
-        }
-        rawContent = firstBlock.text.trim();
+        const content = response.choices[0]?.message?.content ?? "";
+        rawContent = content.trim();
     } finally {
         clearTimeout(timer);
     }
@@ -59,7 +83,7 @@ export async function classifyNode(state: AgentState): Promise<Partial<AgentStat
     try {
         parsed = JSON.parse(rawContent);
     } catch {
-        throw new Error(`Claude returned non-JSON for classify: ${rawContent.slice(0, 200)}`);
+        throw new Error(`MiniMax returned non-JSON for classify: ${rawContent.slice(0, 200)}`);
     }
 
     // Validate contractType is a known enum value

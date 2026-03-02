@@ -39,7 +39,7 @@ export async function GET(
 
     // ─── 1. Load audit record ─────────────────────────────────────────────────
     const auditRecord = await (prisma as any).audit.findUnique({
-        where: { auditId },
+        where: { id: auditId },
     });
 
     if (!auditRecord) {
@@ -52,7 +52,7 @@ export async function GET(
     if (audit.status === AuditStatus.COMPLETE) {
         return NextResponse.json({
             audit: {
-                auditId: audit.auditId,
+                auditId: audit.id,
                 status: audit.status,
                 createdAt: (audit.createdAt as Date).toISOString(),
                 updatedAt: (audit.updatedAt as Date).toISOString(),
@@ -110,7 +110,7 @@ export async function GET(
             : Math.round(ESTIMATED_TOTAL_SECONDS * (1 - progress / 100));
 
     return NextResponse.json({
-        auditId: audit.auditId,
+        auditId: audit.id,
         status: audit.status,
         progress,
         currentStage,

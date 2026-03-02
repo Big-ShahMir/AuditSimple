@@ -126,7 +126,7 @@ export async function POST(request: NextRequest) {
             }
 
             await (prisma as any).audit.update({
-                where: { auditId },
+                where: { id: auditId },
                 data: updateData,
             });
         })
@@ -134,7 +134,7 @@ export async function POST(request: NextRequest) {
             console.error(`[upload] Pipeline error for audit ${auditId}:`, err);
             await (prisma as any).audit
                 .update({
-                    where: { auditId },
+                    where: { id: auditId },
                     data: { status: AuditStatus.FAILED },
                 })
                 .catch(() => undefined); // ignore secondary failure

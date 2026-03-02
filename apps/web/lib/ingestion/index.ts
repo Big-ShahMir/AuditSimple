@@ -127,7 +127,7 @@ export async function validateAndIngest(
     // ─── STEP 2: Create initial Audit record ─────────────────────────────────
     await (prisma as any).audit.create({
         data: {
-            auditId,
+            id: auditId,
             status: AuditStatus.UPLOADING,
             originalFileName: req.fileName,
             documentHash,
@@ -140,7 +140,7 @@ export async function validateAndIngest(
         documentUrl = await storeDocument(auditId, fileBuffer, req.mimeType);
     } catch (err) {
         await (prisma as any).audit.update({
-            where: { auditId },
+            where: { id: auditId },
             data: { status: AuditStatus.FAILED },
         });
         throw new IngestionError(
@@ -151,7 +151,7 @@ export async function validateAndIngest(
     }
 
     await (prisma as any).audit.update({
-        where: { auditId },
+        where: { id: auditId },
         data: { documentUrl },
     });
 
@@ -161,7 +161,7 @@ export async function validateAndIngest(
         pageTexts = await extractText(fileBuffer, req.mimeType, warnings);
     } catch (err) {
         await (prisma as any).audit.update({
-            where: { auditId },
+            where: { id: auditId },
             data: { status: AuditStatus.FAILED },
         });
         throw new IngestionError(
@@ -175,7 +175,7 @@ export async function validateAndIngest(
 
     // ─── STEP 5: Scrub PII (HARD FAIL if Presidio is down) ───────────────────
     await (prisma as any).audit.update({
-        where: { auditId },
+        where: { id: auditId },
         data: { status: AuditStatus.PII_SCRUBBING },
     });
 
@@ -185,7 +185,7 @@ export async function validateAndIngest(
     } catch (err) {
         const isPIIFail = err instanceof PIIServiceUnavailableError;
         await (prisma as any).audit.update({
-            where: { auditId },
+            where: { id: auditId },
             data: { status: AuditStatus.FAILED },
         });
         throw new IngestionError(
@@ -205,7 +205,7 @@ export async function validateAndIngest(
         encryptedPiiMap = encryptPIIMap(piiMap);
     } catch (err) {
         await (prisma as any).audit.update({
-            where: { auditId },
+            where: { id: auditId },
             data: { status: AuditStatus.FAILED },
         });
         throw new IngestionError(
@@ -238,7 +238,7 @@ export async function validateAndIngest(
 
     // ─── STEP 8: Persist scrubbed text and update Audit record ───────────────
     await (prisma as any).audit.update({
-        where: { auditId },
+        where: { id: auditId },
         data: {
             status: AuditStatus.CLASSIFYING, // Ready for the agents pipeline
             scrubbledText,
@@ -292,7 +292,7 @@ export async function getProcessedState(
     auditId: string
 ): Promise<AgentState | null> {
     const auditRecord = await (prisma as any).audit.findUnique({
-        where: { auditId },
+        where: { id: auditId },
     });
 
     if (!auditRecord) return null;
@@ -321,7 +321,7 @@ export async function getProcessedState(
 
     const state: AgentState = {
         audit: {
-            auditId: audit.auditId,
+            auditId: audit.id,
             status: audit.status as AuditStatus,
             createdAt: audit.createdAt.toISOString(),
             updatedAt: audit.updatedAt.toISOString(),

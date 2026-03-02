@@ -8,7 +8,9 @@
 // Instructs the LLM to return null for unfound clauses.
 // ============================================================
 
-import Anthropic from "@anthropic-ai/sdk";
+// import Anthropic from "@anthropic-ai/sdk";        // ← Anthropic SDK (commented out)
+// const anthropic = new Anthropic();                 // ← Anthropic client (commented out)
+import OpenAI from "openai";
 import { randomUUID, createHash } from "crypto";
 import type { AgentState, ExtractedClause, AuditWarning, SourceLocation } from "@auditsimple/types";
 import { AuditStatus, ContractType } from "@auditsimple/types";
@@ -16,7 +18,12 @@ import { EXTRACTION_TEMPLATES } from "@/lib/analysis";
 import { buildExtractPrompt } from "../prompts";
 import { emitProgress } from "../progress";
 
-const anthropic = new Anthropic();
+// NVIDIA NIM — OpenAI-compatible endpoint hosting MiniMax M2.5
+const nvidia = new OpenAI({
+    apiKey: process.env.NVIDIA_API_KEY ?? "",
+    baseURL: "https://integrate.api.nvidia.com/v1",
+});
+
 const EXTRACT_TIMEOUT_MS = 60_000;
 
 // ---------------------------------------------------------------------------
@@ -65,17 +72,46 @@ export async function extractClausesNode(state: AgentState): Promise<Partial<Age
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), EXTRACT_TIMEOUT_MS);
 
-    let response: Anthropic.Message;
+    // ── ANTHROPIC call (commented out) ───────────────────────────────────────
+    // let response: Anthropic.Message;
+    // try {
+    //     response = await anthropic.messages.create(
+    //         {
+    //             model: "claude-3-5-sonnet-20241022",
+    //             max_tokens: 4000,
+    //             temperature: 0.0,
+    //             system,
+    //             messages: [{ role: "user", content: user }],
+    //             tools: tools as Anthropic.Tool[],
+    //             tool_choice: tool_choice as Anthropic.ToolChoiceAny,
+    //         },
+    //         { signal: controller.signal },
+    //     );
+    // } finally {
+    //     clearTimeout(timer);
+    // }
+    // for (const block of response.content) {
+    //     if (block.type !== "tool_use") continue;
+    //     const template = templateMap.get(block.name);
+    //     if (!template) continue;
+    //     const input = block.input as { ... };
+    // }
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // NVIDIA NIM — MiniMax M2.5 (OpenAI-compatible function calling)
+    let response: OpenAI.Chat.ChatCompletion;
     try {
-        response = await anthropic.messages.create(
+        response = await nvidia.chat.completions.create(
             {
-                model: "claude-3-5-sonnet-20241022",
+                model: "minimaxai/minimax-m2.5",
                 max_tokens: 4000,
                 temperature: 0.0,
-                system,
-                messages: [{ role: "user", content: user }],
-                tools: tools as Anthropic.Tool[],
-                tool_choice: tool_choice as Anthropic.ToolChoiceAny,
+                messages: [
+                    { role: "system", content: system },
+                    { role: "user", content: user },
+                ],
+                tools,
+                tool_choice,
             },
             { signal: controller.signal },
         );
@@ -89,14 +125,19 @@ export async function extractClausesNode(state: AgentState): Promise<Partial<Age
     const clauses: ExtractedClause[] = [];
     const warnings: AuditWarning[] = [];
 
-    for (const block of response.content) {
-        if (block.type !== "tool_use") continue;
+    // OpenAI tool_calls are on response.choices[0].message.tool_calls
+    const toolCalls = response.choices[0]?.message?.tool_calls ?? [];
 
-        const template = templateMap.get(block.name);
+    for (const toolCall of toolCalls) {
+        if (toolCall.type !== "function") continue;
+
+        const template = templateMap.get(toolCall.function.name);
         if (!template) continue;
 
         // The LLM may return rawValue = null to indicate "not found in document"
-        const input = block.input as {
+        // OpenAI returns tool arguments as a JSON string — parse it.
+        // (Anthropic returned block.input as a pre-parsed object.)
+        let input: {
             rawValue: string | null;
             numericValue: number | null;
             unit: string | null;
@@ -107,6 +148,12 @@ export async function extractClausesNode(state: AgentState): Promise<Partial<Age
             charOffsetEnd: number;
             extractionConfidence: number;
         };
+        try {
+            input = JSON.parse(toolCall.function.arguments);
+        } catch {
+            // Malformed arguments from the model — skip this tool call
+            continue;
+        }
 
         // Skip null clauses (explicitly not found in document)
         if (input.rawValue === null) continue;

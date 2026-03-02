@@ -75,21 +75,44 @@ export function buildClassifyPrompt(scrubbledText: string): ClassifyPromptResult
 // Extract-clauses prompt (tool-use / function-calling mode)
 // ---------------------------------------------------------------------------
 
-export interface AnthropicTool {
-    name: string;
-    description: string;
-    input_schema: {
-        type: "object";
-        properties: Record<string, unknown>;
-        required: string[];
+// ── ANTHROPIC TOOL FORMAT (commented out, preserved for reference) ──────────
+// export interface AnthropicTool {
+//     name: string;
+//     description: string;
+//     input_schema: {
+//         type: "object";
+//         properties: Record<string, unknown>;
+//         required: string[];
+//     };
+// }
+//
+// export interface ExtractPromptResult {
+//     system: string;
+//     user: string;
+//     tools: AnthropicTool[];
+//     tool_choice: { type: "any" };
+// }
+// ────────────────────────────────────────────────────────────────────────────
+
+// OpenAI-compatible tool format (used by NVIDIA NIM / Qwen3.5-397B)
+export interface OpenAITool {
+    type: "function";
+    function: {
+        name: string;
+        description: string;
+        parameters: {
+            type: "object";
+            properties: Record<string, unknown>;
+            required: string[];
+        };
     };
 }
 
 export interface ExtractPromptResult {
     system: string;
     user: string;
-    tools: AnthropicTool[];
-    tool_choice: { type: "any" };
+    tools: OpenAITool[];
+    tool_choice: "required";
 }
 
 /**
@@ -136,13 +159,27 @@ export function buildExtractPrompt(
         "---END DOCUMENT---",
     ].join("\n");
 
-    // Generate one tool per template
-    const tools: AnthropicTool[] = templates.map((template) => ({
-        name: `extract_${template.label}`,
-        description: `Extract the "${template.label}" clause. ${template.promptHint}`,
-        input_schema: {
-            type: "object" as const,
-            properties: {
+    // ── ANTHROPIC tool schema (commented out, preserved for reference) ────────
+    // const tools: AnthropicTool[] = templates.map((template) => ({
+    //     name: `extract_${template.label}`,
+    //     description: `Extract the "${template.label}" clause. ${template.promptHint}`,
+    //     input_schema: {
+    //         type: "object" as const,
+    //         properties: { ... },
+    //         required: [ ... ],
+    //     },
+    // }));
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // OpenAI-compatible tool schema (NVIDIA NIM / Qwen3.5-397B)
+    const tools: OpenAITool[] = templates.map((template) => ({
+        type: "function" as const,
+        function: {
+            name: `extract_${template.label}`,
+            description: `Extract the "${template.label}" clause. ${template.promptHint}`,
+            parameters: {
+                type: "object" as const,
+                properties: {
                 rawValue: {
                     type: ["string", "null"],
                     description:
@@ -198,10 +235,11 @@ export function buildExtractPrompt(
                 "charOffsetEnd",
                 "extractionConfidence",
             ],
-        },
+            },  // closes parameters
+        },      // closes function
     }));
 
-    return { system, user, tools, tool_choice: { type: "any" } };
+    return { system, user, tools, tool_choice: "required" };
 }
 
 // ---------------------------------------------------------------------------

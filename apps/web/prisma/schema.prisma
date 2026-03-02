@@ -20,7 +20,7 @@ datasource db {
 // PostgreSQL provider maps String → text, which is sufficient for all sizes.
 
 model Audit {
-  auditId          String    @id @default(uuid())
+  id               String    @id @default(uuid())
   status           String    // AuditStatus enum value
   originalFileName String
   documentHash     String
@@ -58,7 +58,7 @@ model PIIRecord {
   auditId         String @unique
   encryptedPiiMap Bytes
 
-  audit           Audit  @relation(fields: [auditId], references: [auditId])
+  audit           Audit  @relation(fields: [auditId], references: [id])
 }
 
 // ── BenchmarkRate ───────────────────────────────────────────────────────────

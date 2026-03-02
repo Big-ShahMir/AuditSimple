@@ -8,14 +8,21 @@
 // NO LLM involvement in the score.
 // ============================================================
 
-import Anthropic from "@anthropic-ai/sdk";
+// import Anthropic from "@anthropic-ai/sdk";        // ← Anthropic SDK (commented out)
+// const anthropic = new Anthropic();                 // ← Anthropic client (commented out)
+import OpenAI from "openai";
 import type { AgentState, AuditIssue, AuditWarning } from "@auditsimple/types";
 import { AuditStatus, SeverityLevel } from "@auditsimple/types";
 import { gateConfidence } from "@/lib/citations";
 import { buildSynthesizePrompt } from "../prompts";
 import { emitProgress } from "../progress";
 
-const anthropic = new Anthropic();
+// NVIDIA NIM — OpenAI-compatible endpoint hosting MiniMax M2.5
+const nvidia = new OpenAI({
+    apiKey: process.env.NVIDIA_API_KEY ?? "",
+    baseURL: "https://integrate.api.nvidia.com/v1",
+});
+
 const SYNTHESIZE_TIMEOUT_MS = 30_000;
 
 // ---------------------------------------------------------------------------
@@ -88,21 +95,39 @@ export async function synthesizeNode(state: AgentState): Promise<Partial<AgentSt
     let executiveSummary: string = "";
 
     try {
-        const response = await anthropic.messages.create(
+        // ── ANTHROPIC call (commented out) ───────────────────────────────────
+        // const response = await anthropic.messages.create(
+        //     {
+        //         model: "claude-3-5-haiku-20241022",
+        //         max_tokens: 1000,
+        //         temperature: 0.3,
+        //         system,
+        //         messages: [{ role: "user", content: user }],
+        //     },
+        //     { signal: controller.signal },
+        // );
+        // const firstBlock = response.content[0];
+        // if (firstBlock?.type === "text") {
+        //     executiveSummary = firstBlock.text.trim();
+        // }
+        // ─────────────────────────────────────────────────────────────────────
+
+        // NVIDIA NIM — MiniMax M2.5
+        const response = await nvidia.chat.completions.create(
             {
-                model: "claude-3-5-haiku-20241022",
+                model: "minimaxai/minimax-m2.5",
                 max_tokens: 1000,
                 temperature: 0.3,
-                system,
-                messages: [{ role: "user", content: user }],
+                messages: [
+                    { role: "system", content: system },
+                    { role: "user", content: user },
+                ],
             },
             { signal: controller.signal },
         );
 
-        const firstBlock = response.content[0];
-        if (firstBlock?.type === "text") {
-            executiveSummary = firstBlock.text.trim();
-        }
+        const content = response.choices[0]?.message?.content ?? "";
+        executiveSummary = content.trim();
     } catch (err) {
         // Graceful degradation: summary generation failure doesn't fail the audit
         warnings.push({

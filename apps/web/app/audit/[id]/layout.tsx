@@ -1,7 +1,7 @@
 import React from "react";
 import { Metadata } from "next";
 
-export async function generateMetadata({ params }: { params: { id: string } }): Promise<Metadata> {
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
     // We don't have the original filename here without a fetch, 
     // so we'll use a generic title for now or "SHIELD Audit"
     return {

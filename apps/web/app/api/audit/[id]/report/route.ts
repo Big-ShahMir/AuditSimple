@@ -25,7 +25,7 @@ export async function GET(
     const { id: auditId } = await params;
 
     const record = await (prisma as any).audit.findUnique({
-        where: { auditId },
+        where: { id: auditId },
         select: { documentUrl: true },
     });
 

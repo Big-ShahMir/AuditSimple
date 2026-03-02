@@ -47,10 +47,11 @@ async function AuditPageContent({ id }: { id: string }) {
     }
 }
 
-export default function AuditPage({ params }: { params: { id: string } }) {
+export default async function AuditPage({ params }: { params: Promise<{ id: string }> }) {
+    const { id } = await params;
     return (
         <Suspense fallback={<AuditLoading />}>
-            <AuditPageContent id={params.id} />
+            <AuditPageContent id={id} />
         </Suspense>
     );
 }

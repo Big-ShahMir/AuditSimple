@@ -3,7 +3,10 @@
 // ============================================================
 // Classification node — identifies the contract type from scrubbed text.
 //
-// LLM config: temperature 0.0, max_tokens 200, timeout 15s
+// LLM config: temperature 0.0, max_tokens 10000, timeout 30s, json_object mode
+// response_format json_object suppresses MiniMax's <think>…</think> preamble.
+// The <think> stripper + regex fallback remain as belt-and-suspenders in case
+// the NIM endpoint passes thinking tokens through in the content field.
 // Returns: ContractType + appends warning if confidence < 0.6
 // ============================================================
 
@@ -21,7 +24,7 @@ const nvidia = new OpenAI({
     baseURL: "https://integrate.api.nvidia.com/v1",
 });
 
-const CLASSIFY_TIMEOUT_MS = 15_000;
+const CLASSIFY_TIMEOUT_MS = 30_000;
 const LOW_CONFIDENCE_THRESHOLD = 0.6;
 
 // ---------------------------------------------------------------------------
@@ -59,11 +62,15 @@ export async function classifyNode(state: AgentState): Promise<Partial<AgentStat
         // ─────────────────────────────────────────────────────────────────────
 
         // NVIDIA NIM — MiniMax M2.5
+        // response_format json_object: suppresses the <think>…</think> reasoning
+        // preamble and forces MiniMax to emit only valid JSON.
+        // max_tokens 10000: safety margin if thinking still appears in content.
         const response = await nvidia.chat.completions.create(
             {
                 model: "minimaxai/minimax-m2.5",
-                max_tokens: 200,
+                max_tokens: 10000,
                 temperature: 0.0,
+                response_format: { type: "json_object" },
                 messages: [
                     { role: "system", content: system },
                     { role: "user", content: user },
@@ -73,17 +80,28 @@ export async function classifyNode(state: AgentState): Promise<Partial<AgentStat
         );
 
         const content = response.choices[0]?.message?.content ?? "";
-        rawContent = content.trim();
+        // Strip <think>…</think> reasoning blocks that MiniMax emits before the answer
+        rawContent = content.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
     } finally {
         clearTimeout(timer);
     }
 
-    // Parse the JSON response
+    // Parse the JSON response.
+    // MiniMax may still wrap the JSON in surrounding text even after <think> removal,
+    // so fall back to extracting the first {...} block via regex.
     let parsed: { contractType: string; confidence: number };
     try {
         parsed = JSON.parse(rawContent);
     } catch {
-        throw new Error(`MiniMax returned non-JSON for classify: ${rawContent.slice(0, 200)}`);
+        const match = rawContent.match(/\{[\s\S]*\}/);
+        if (!match) {
+            throw new Error(`MiniMax returned non-JSON for classify: ${rawContent.slice(0, 300)}`);
+        }
+        try {
+            parsed = JSON.parse(match[0]);
+        } catch {
+            throw new Error(`MiniMax returned non-JSON for classify: ${rawContent.slice(0, 300)}`);
+        }
     }
 
     // Validate contractType is a known enum value

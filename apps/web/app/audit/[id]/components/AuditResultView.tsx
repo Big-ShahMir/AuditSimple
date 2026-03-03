@@ -67,7 +67,7 @@ export function AuditResultView({ audit, documentViewUrl }: AuditResultViewProps
                 <div className="flex flex-col gap-6">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <CostOfLoyaltyCard costOfLoyalty={audit.costOfLoyalty} />
-                        <RiskScoreGauge score={audit.riskScore} />
+                        <RiskScoreGauge score={audit.riskScore} issues={audit.issues} />
                     </div>
 
                     <ReasoningTree

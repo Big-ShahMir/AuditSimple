@@ -1,7 +1,7 @@
 // ============================================================
 // apps/web/lib/agents/graph.ts
 // ============================================================
-// LangGraph state machine for the AuditSimple analysis pipeline.
+// LangGraph state machine for the SimplyAudit analysis pipeline.
 //
 // Topology:
 //   classify → extract_clauses → validate_clauses → benchmark
@@ -185,7 +185,7 @@ const graph = new StateGraph(AgentStateAnnotation)
 // ---------------------------------------------------------------------------
 
 /**
- * Runs the full AuditSimple analysis pipeline on pre-processed AgentState.
+ * Runs the full SimplyAudit analysis pipeline on pre-processed AgentState.
  *
  * The caller (app/api/analyze/route.ts) is responsible for constructing
  * the initial state via createInitialState() from lib/agents/state.ts.

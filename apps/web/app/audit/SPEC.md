@@ -41,7 +41,7 @@ This page is the **demo page**. When judges evaluate the app, this is what they'
 
 ### Page & Layout
 - **`page.tsx`** — Next.js App Router page component. Server component that fetches initial audit data via `fetch()` to `/api/audit/[id]`. Renders the appropriate mode: `<ProgressView>` if `status !== COMPLETE && status !== FAILED`, `<AuditResultView>` if `status === COMPLETE`, `<ErrorView>` if `status === FAILED`. Uses `Suspense` with a skeleton loader for the initial data fetch.
-- **`layout.tsx`** — Minimal layout wrapper. Sets page title to `"Audit: {fileName} — SHIELD"`. Provides the audit ID context to child components.
+- **`layout.tsx`** — Minimal layout wrapper. Sets page title to `"Audit: {fileName} — SimplyAudit"`. Provides the audit ID context to child components.
 - **`loading.tsx`** — Skeleton loader shown during server component data fetching. Full-page skeleton matching the layout of the results view (card placeholders, tree skeleton, document viewer placeholder).
 
 ### Core Result Components

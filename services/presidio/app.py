@@ -1,5 +1,5 @@
 """
-Main entry point for the AuditSimple Presidio PII detection sidecar.
+Main entry point for the SimplyAudit Presidio PII detection sidecar.
 
 Exposes three HTTP endpoints:
   POST /analyze   — Detect PII entities in text

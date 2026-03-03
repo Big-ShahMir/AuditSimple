@@ -67,14 +67,14 @@ export default function DashboardPage() {
             <div className="text-center mb-12">
                 <div className="inline-flex items-center gap-2 text-xs font-semibold tracking-widest uppercase text-slate-400 mb-6">
                     <span className="w-8 h-px bg-slate-300" />
-                    SHIELD
+                    SimplyAudit
                     <span className="w-8 h-px bg-slate-300" />
                 </div>
                 <h1 className="text-4xl sm:text-5xl font-serif text-slate-900 tracking-tight mb-4">
                     Know the True Cost
                 </h1>
                 <p className="text-slate-500 max-w-md mx-auto leading-relaxed">
-                    Upload your financial contract. SHIELD analyzes every clause, benchmarks
+                    Upload your financial contract. SimplyAudit analyzes every clause, benchmarks
                     against market rates, and calculates your exact Cost of Loyalty — so you
                     can decide with full information.
                 </p>

@@ -1,6 +1,6 @@
 # SYSTEM_DESIGN: Information Asymmetry Defense Bot
 
-> **Version:** 1.0.0 | **Sprint Duration:** 4 Days | **Codename:** SHIELD  
+> **Version:** 1.0.0 | **Sprint Duration:** 4 Days | **Codename:** SimplyAudit  
 > **Target:** Wealthsimple AI Builders Challenge  
 > **Audience:** Autonomous coding agents (Claude Code, Antigravity)
 
@@ -62,7 +62,7 @@ Modular monolith for the MVP sprint. Each "Layer" is a discrete module with stri
 ### Directory Structure
 
 ```
-shield/
+simplyaudit/
 ├── apps/
 │   └── web/                    # Next.js 14 application
 │       ├── app/

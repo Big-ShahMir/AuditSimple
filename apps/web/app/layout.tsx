@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-    title: "SHIELD — Financial Document Auditor",
+    title: "SimplyAudit — Financial Document Auditor",
     description: "Uncover the true cost of your financial products.",
 };
 

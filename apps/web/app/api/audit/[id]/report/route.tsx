@@ -9,7 +9,7 @@
 //
 // TODO: Generate formatted PDF audit report post-MVP.
 //   - Use a PDF generation library (e.g., @react-pdf/renderer or puppeteer)
-//     to produce a styled AuditSimple report from the ContractAudit data.
+//     to produce a styled SimplyAudit report from the ContractAudit data.
 //   - Include: executive summary, cost of loyalty, issues table,
 //     clause-by-clause breakdown, benchmark comparisons, and citations.
 //   - Stream the generated PDF directly or upload it to Blob and redirect.
@@ -79,7 +79,7 @@ export async function GET(
         return new NextResponse(webStream, {
             headers: {
                 "Content-Type": "application/pdf",
-                "Content-Disposition": `attachment; filename="auditsimple-report-${auditId}.pdf"`,
+                "Content-Disposition": `attachment; filename="simplyaudit-report-${auditId}.pdf"`,
             },
         });
     } catch (error: any) {

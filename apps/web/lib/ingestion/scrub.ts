@@ -209,7 +209,7 @@ export async function scrubPII(
     if (unknownTypeCount > 0) {
         warnings.push({
             code: "UNKNOWN_PII_ENTITY_TYPES",
-            message: `${unknownTypeCount} PII entity detection(s) were skipped because their entity type is not recognized by AuditSimple. The affected offsets have been logged (types only, no values).`,
+            message: `${unknownTypeCount} PII entity detection(s) were skipped because their entity type is not recognized by SimplyAudit. The affected offsets have been logged (types only, no values).`,
             recoverable: true,
             stage: AuditStatusEnum.PII_SCRUBBING,
         });

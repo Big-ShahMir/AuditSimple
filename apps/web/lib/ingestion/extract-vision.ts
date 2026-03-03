@@ -168,7 +168,6 @@ export async function extractViaVision(
     const client = new Anthropic();
     const pageTexts: PageText[] = [];
 
-    let globalCharOffset = 0;
     let anyImprecise = false;
 
     for (let i = 0; i < pages.length; i++) {
@@ -234,7 +233,7 @@ export async function extractViaVision(
             // Split line into words and assign proportional horizontal bounding boxes
             const words = line.text.split(/\s+/).filter((w) => w.length > 0);
             const lineTextLength = line.text.length;
-            let lineCharOffset = globalCharOffset + pageText.length;
+            let lineCharOffset = pageText.length;
 
             let wordHorizOffset = 0;
             for (const word of words) {
@@ -270,8 +269,6 @@ export async function extractViaVision(
             text: pageText,
             wordPositions,
         });
-
-        globalCharOffset += pageText.length;
     }
 
     // Emit a single warning if any page had imprecise positions

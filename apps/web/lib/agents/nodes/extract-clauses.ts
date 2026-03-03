@@ -24,7 +24,9 @@ const nvidia = new OpenAI({
     baseURL: "https://integrate.api.nvidia.com/v1",
 });
 
-const EXTRACT_TIMEOUT_MS = 60_000;
+// DeepSeek tool-calling on larger documents can take longer than a minute.
+// Keep the node timeout comfortably above the observed 57-60s failure window.
+const EXTRACT_TIMEOUT_MS = 180_000;
 
 // ---------------------------------------------------------------------------
 // Helpers

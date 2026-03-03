@@ -46,6 +46,10 @@ function makeSafeNode(fn: NodeFn, errorCode: string, stage: AuditStatus): NodeFn
         try {
             return await fn(state);
         } catch (err) {
+            console.error(
+                `[graph] Node "${state.currentNode || "unknown"}" threw and was converted to ${errorCode}.`,
+                err,
+            );
             const warning: AuditWarning = {
                 code: errorCode,
                 message: err instanceof Error ? err.message : String(err),
@@ -109,6 +113,10 @@ function routeAfterExtractClauses(state: AgentState): "validate_clauses" | "fail
  * warnings into audit.warnings for persistence.
  */
 async function failedNode(state: AgentState): Promise<Partial<AgentState>> {
+    console.error(
+        `[graph] Entering failed node for audit ${state.audit.auditId ?? "unknown"}. Non-recoverable errors:`,
+        state.errors.filter((error) => !error.recoverable),
+    );
     emitProgress(state, { node: "failed", status: AuditStatus.FAILED });
     const completedAt = new Date().toISOString();
     return {
@@ -187,5 +195,12 @@ const graph = new StateGraph(AgentStateAnnotation)
  */
 export async function runAuditPipeline(initialState: AgentState): Promise<AgentState> {
     const result = await graph.invoke(initialState as unknown as Parameters<typeof graph.invoke>[0]);
+    console.log(
+        `[graph] Pipeline finished for audit ${result.audit?.auditId ?? initialState.audit.auditId ?? "unknown"} with status ${result.audit?.status ?? "unknown"}.`,
+        {
+            currentNode: result.currentNode,
+            warningCodes: (result.errors ?? []).map((error) => error.code),
+        },
+    );
     return result as unknown as AgentState;
 }

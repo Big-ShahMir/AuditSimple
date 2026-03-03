@@ -1,7 +1,7 @@
 // ============================================================
 // apps/web/lib/citations/reextract.ts
 // ============================================================
-// Tier 3: LLM re-extraction fallback via Claude Vision.
+// Tier 3: LLM re-extraction fallback via NVIDIA multimodal.
 //
 // Only invoked when Tiers 1 and 2 both fail. This is the ONLY
 // LLM call in the citations module. If it fails, treat the
@@ -9,26 +9,41 @@
 // governed by lib/agents/retry.ts.
 // ============================================================
 
-import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import type { ExtractedClause } from "@auditsimple/types";
+import type { AuditWarning } from "@auditsimple/types";
+import { AuditStatus } from "@auditsimple/types";
 import type { MatchResult, PageText } from "./types";
 import { findExactMatch } from "./exact-match";
 import { findFuzzyMatch } from "./fuzzy-match";
 import { CITATION_MATCH_CONFIG } from "./config";
+import { renderStoredPageToImage } from "./render-page";
 
 // ---------------------------------------------------------------------------
-// Anthropic client (singleton per process)
+// NVIDIA client (singleton per process)
 // ---------------------------------------------------------------------------
 
-let _anthropicClient: Anthropic | null = null;
+const CITATION_REEXTRACT_TIMEOUT_MS = 30_000;
+const CITATION_VISION_MODEL =
+    process.env.NVIDIA_CITATION_VISION_MODEL ?? "meta/llama-3.2-90b-vision-instruct";
 
-function getAnthropicClient(): Anthropic {
-    if (!_anthropicClient) {
-        _anthropicClient = new Anthropic({
-            apiKey: process.env.ANTHROPIC_API_KEY,
-        });
-    }
-    return _anthropicClient;
+const nvidia = new OpenAI({
+    apiKey: process.env.NVIDIA_API_KEY ?? "",
+    baseURL: "https://integrate.api.nvidia.com/v1",
+});
+
+interface ReextractResult {
+    match: MatchResult | null;
+    warning?: AuditWarning;
+}
+
+function buildWarning(code: string, message: string): AuditWarning {
+    return {
+        code,
+        message,
+        recoverable: true,
+        stage: AuditStatus.CITING,
+    };
 }
 
 // ---------------------------------------------------------------------------
@@ -70,61 +85,98 @@ function buildReextractionPrompt(clause: ExtractedClause): string {
  * Per SPEC: if this call throws or times out, the error propagates up to
  * verifyCitations() which treats it as UNVERIFIED. Do NOT retry here.
  *
+ * @param auditId   - The audit id, used to load the stored source document page
  * @param clause    - The clause we're trying to verify
- * @param pageImage - The rendered page image as a Buffer (PNG or JPEG)
  * @param pageText  - Full text of the relevant page (for anchor matching after LLM responds)
  */
 export async function reextractFromPage(
+    auditId: string,
     clause: ExtractedClause,
-    pageImage: Buffer,
     pageText: string,
-): Promise<MatchResult | null> {
-    // If we received an empty page image or empty page text, there is nothing to do
-    if (!pageImage || pageImage.length === 0 || !pageText) {
-        return null;
+): Promise<ReextractResult> {
+    if (!process.env.NVIDIA_API_KEY) {
+        return {
+            match: null,
+            warning: buildWarning(
+                "L3_CITE_REEXTRACT_FAILED",
+                "NVIDIA_API_KEY is not set, so citation re-extraction could not run.",
+            ),
+        };
     }
 
-    const client = getAnthropicClient();
+    if (!pageText) {
+        return {
+            match: null,
+            warning: buildWarning(
+                "L3_CITE_REEXTRACT_FAILED",
+                `Citation re-extraction skipped for "${clause.label}" because page text is empty.`,
+            ),
+        };
+    }
+
+    const renderedPage = await renderStoredPageToImage(auditId, clause.source.pageNumber);
+    if (renderedPage.warning) {
+        return { match: null, warning: renderedPage.warning };
+    }
+    if (!renderedPage.image || !renderedPage.mediaType) {
+        return {
+            match: null,
+            warning: buildWarning(
+                "L3_CITE_RENDER_PAGE_FAILED",
+                `Citation re-extraction could not load page ${clause.source.pageNumber} for "${clause.label}".`,
+            ),
+        };
+    }
+
     const prompt = buildReextractionPrompt(clause);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), CITATION_REEXTRACT_TIMEOUT_MS);
 
-    // Encode the page image as base64 for the Claude Vision API
-    const base64Image = pageImage.toString("base64");
-
-    // Detect media type from first bytes of the Buffer
-    const mediaType = detectImageMediaType(pageImage);
-
-    const response = await client.messages.create({
-        model: "claude-opus-4-5",
-        max_tokens: 512,
-        messages: [
+    let llmQuote = "";
+    try {
+        const response = await nvidia.chat.completions.create(
             {
-                role: "user",
-                content: [
+                model: CITATION_VISION_MODEL,
+                max_tokens: 512,
+                temperature: 0,
+                messages: [
                     {
-                        type: "image",
-                        source: {
-                            type: "base64",
-                            media_type: mediaType,
-                            data: base64Image,
-                        },
-                    },
-                    {
-                        type: "text",
-                        text: prompt,
+                        role: "user",
+                        content: [
+                            {
+                                type: "text",
+                                text: prompt,
+                            },
+                            {
+                                type: "image_url",
+                                image_url: {
+                                    url: `data:${renderedPage.mediaType};base64,${renderedPage.image.toString("base64")}`,
+                                },
+                            },
+                        ],
                     },
                 ],
             },
-        ],
-    });
+            { signal: controller.signal },
+        );
 
-    // Extract the model's text response
-    const textBlock = response.content.find((block) => block.type === "text");
-    if (!textBlock || textBlock.type !== "text") return null;
-
-    const llmQuote = textBlock.text.trim();
+        llmQuote = (response.choices[0]?.message?.content ?? "").trim();
+    } catch (err) {
+        return {
+            match: null,
+            warning: buildWarning(
+                "L3_CITE_REEXTRACT_FAILED",
+                `Citation re-extraction failed for "${clause.label}" on page ${clause.source.pageNumber}: ${err instanceof Error ? err.message : String(err)}`,
+            ),
+        };
+    } finally {
+        clearTimeout(timer);
+    }
 
     // If the model signalled it couldn't find the clause, bail out
-    if (!llmQuote || llmQuote === "NOT_FOUND") return null;
+    if (!llmQuote || llmQuote === "NOT_FOUND") {
+        return { match: null };
+    }
 
     // Wrap the single page into a PageText array so we can reuse the existing matchers
     const singlePageText: PageText = {
@@ -135,62 +187,18 @@ export async function reextractFromPage(
 
     // First, try exact match against the LLM's quote on this page
     const exactResult = findExactMatch(llmQuote, [singlePageText], CITATION_MATCH_CONFIG);
-    if (exactResult) return exactResult;
+    if (exactResult) return { match: exactResult };
 
     // If exact fails, try fuzzy match — LLM might introduce minor differences
     const fuzzyResult = findFuzzyMatch(llmQuote, [singlePageText], CITATION_MATCH_CONFIG);
-    if (fuzzyResult) return fuzzyResult;
+    if (fuzzyResult) return { match: fuzzyResult };
 
     // LLM returned a quote but we couldn't anchor it in the text — treat as failure
-    return null;
-}
-
-// ---------------------------------------------------------------------------
-// Image media type detection
-// ---------------------------------------------------------------------------
-
-/**
- * Detects whether a Buffer contains a PNG or JPEG image by inspecting
- * the file signature (magic bytes). Defaults to JPEG if unknown.
- */
-function detectImageMediaType(
-    buffer: Buffer,
-): "image/png" | "image/jpeg" | "image/gif" | "image/webp" {
-    if (buffer.length < 4) return "image/jpeg";
-
-    // PNG: starts with 0x89 0x50 0x4E 0x47
-    if (
-        buffer[0] === 0x89 &&
-        buffer[1] === 0x50 &&
-        buffer[2] === 0x4e &&
-        buffer[3] === 0x47
-    ) {
-        return "image/png";
-    }
-
-    // JPEG: starts with 0xFF 0xD8
-    if (buffer[0] === 0xff && buffer[1] === 0xd8) {
-        return "image/jpeg";
-    }
-
-    // WebP: starts with RIFF____WEBP
-    if (
-        buffer[0] === 0x52 &&
-        buffer[1] === 0x49 &&
-        buffer[2] === 0x46 &&
-        buffer[3] === 0x46 &&
-        buffer[8] === 0x57 &&
-        buffer[9] === 0x45 &&
-        buffer[10] === 0x42 &&
-        buffer[11] === 0x50
-    ) {
-        return "image/webp";
-    }
-
-    // GIF: starts with GIF8
-    if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46) {
-        return "image/gif";
-    }
-
-    return "image/jpeg";
+    return {
+        match: null,
+        warning: buildWarning(
+            "L3_CITE_REEXTRACT_FAILED",
+            `Citation re-extraction returned an unanchorable quote for "${clause.label}" on page ${clause.source.pageNumber}.`,
+        ),
+    };
 }

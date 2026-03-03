@@ -108,6 +108,14 @@ export async function POST(request: NextRequest) {
                 finalState.audit?.status === AuditStatus.COMPLETE;
             const now = new Date();
 
+            console.log(
+                `[upload] Pipeline resolved for audit ${auditId} with status ${finalState.audit?.status ?? "unknown"}.`,
+                {
+                    currentNode: finalState.currentNode,
+                    warningCodes: (finalState.errors ?? []).map((error) => error.code),
+                },
+            );
+
             const updateData: Record<string, unknown> = {
                 status: isComplete ? AuditStatus.COMPLETE : AuditStatus.FAILED,
                 completedAt: now,
@@ -127,10 +135,21 @@ export async function POST(request: NextRequest) {
                 });
             }
 
-            await (prisma as any).audit.update({
-                where: { id: auditId },
-                data: updateData,
-            });
+            try {
+                await (prisma as any).audit.update({
+                    where: { id: auditId },
+                    data: updateData,
+                });
+                console.log(
+                    `[upload] Persisted final audit state for ${auditId} as ${updateData.status}.`,
+                );
+            } catch (err) {
+                console.error(
+                    `[upload] Failed to persist final audit state for ${auditId}.`,
+                    err,
+                );
+                throw err;
+            }
         })
         .catch(async (err) => {
             console.error(`[upload] Pipeline error for audit ${auditId}:`, err);

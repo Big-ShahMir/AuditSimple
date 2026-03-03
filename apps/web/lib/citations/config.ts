@@ -22,7 +22,7 @@ export const CITATION_MATCH_CONFIG: Readonly<CitationMatchConfig> = Object.freez
      * 0.85 means the matched window must be 85% similar to the needle.
      * Raising this reduces false-positive matches; lowering it increases recall.
      */
-    minSimilarityThreshold: 0.85,
+    minSimilarityThreshold: 0.82,
 
     /**
      * Collapse internal whitespace and trim before comparing.

@@ -17,7 +17,7 @@ export function CostOfLoyaltyCard({ costOfLoyalty }: { costOfLoyalty: CostOfLoya
                 The projected excess cost of remaining in this contract over its lifetime compared to fair-market benchmarks.
             </p>
 
-            <div className="font-serif text-4xl md:text-5xl lg:text-6xl tracking-tight text-slate-900 mb-2">
+            <div className="font-serif text-3xl md:text-4xl lg:text-5xl tracking-tight text-slate-900 mb-2">
                 {formatCAD(costOfLoyalty.totalCost)}
             </div>
 

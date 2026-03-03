@@ -121,8 +121,6 @@ export async function extractPdfStructured(
     const numPages = pdfDoc.numPages;
     const pageTexts: PageText[] = [];
 
-    let globalCharOffset = 0;
-
     for (let pageNum = 1; pageNum <= numPages; pageNum++) {
         const page = await pdfDoc.getPage(pageNum);
         const viewport = page.getViewport({ scale: 1.0 });
@@ -151,7 +149,7 @@ export async function extractPdfStructured(
             // pdfjs sometimes returns multi-word items; we split and distribute
             // bounding boxes proportionally.
             const words = textItem.str.split(/(\s+)/);
-            let itemCharOffset = globalCharOffset + pageText.length;
+            let itemCharOffset = pageText.length;
 
             for (const segment of words) {
                 if (segment.trim() !== "") {
@@ -177,8 +175,6 @@ export async function extractPdfStructured(
             text: pageText,
             wordPositions,
         });
-
-        globalCharOffset += pageText.length;
 
         page.cleanup();
     }

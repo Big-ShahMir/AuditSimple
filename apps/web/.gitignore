@@ -6,3 +6,6 @@ node_modules
 
 # Local document storage (dev fallback when BLOB_READ_WRITE_TOKEN is not set)
 /uploads/
+
+/pycache/
+__pycache__/

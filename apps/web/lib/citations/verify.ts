@@ -7,7 +7,7 @@
 //
 // Tier 1: Exact string match   (findExactMatch)
 // Tier 2: Fuzzy match          (findFuzzyMatch — Jaro-Winkler sliding window)
-// Tier 3: LLM re-extraction    (reextractFromPage — Claude Vision)
+// Tier 3: LLM re-extraction    (reextractFromPage — NVIDIA multimodal)
 // Fallback: UNVERIFIED flag    (confidence × 0.4 penalty)
 //
 // Per SPEC: NEVER skip verification. If all three tiers fail,
@@ -38,33 +38,6 @@ import { computeBoundingBox } from "./bounding-box";
  */
 function computeTextHash(matchedText: string): string {
     return createHash("sha256").update(matchedText, "utf8").digest("hex");
-}
-
-// ---------------------------------------------------------------------------
-// Page image rendering stub
-// ---------------------------------------------------------------------------
-
-/**
- * Renders a document page to an image Buffer for the Tier 3 LLM re-extraction.
- *
- * In production, this would integrate with the PDF renderer (e.g., PDF.js,
- * Ghostscript, or a cloud rendering service) to produce a PNG of the page.
- *
- * For the MVP, we return an empty Buffer when no rendered image is available.
- * The reextractFromPage function handles empty Buffers gracefully by returning null,
- * which causes the clause to fall through to the UNVERIFIED path.
- *
- * TODO: Implement real page-to-image rendering once the PDF pipeline is finalised.
- */
-async function renderPageToImage(
-    pageNumber: number,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _pageTexts: PageText[],
-): Promise<Buffer> {
-    // Placeholder: real implementation would look up a pre-rendered image from
-    // the ingestion pipeline's output (stored in object storage keyed by auditId + pageNumber).
-    void pageNumber;
-    return Buffer.alloc(0);
 }
 
 // ---------------------------------------------------------------------------
@@ -103,7 +76,10 @@ function anchorClause(
     );
 
     if (bboxWarning) {
-        warnings.push(bboxWarning);
+        warnings.push({
+            ...bboxWarning,
+            message: `Could not locate word-level bounding boxes for "${clause.label}" on page ${match.pageNumber} — falling back to full-page highlight.`,
+        });
     }
 
     const updatedSource: SourceLocation = {
@@ -133,46 +109,55 @@ function anchorClause(
  * optional warning if the clause could not be verified.
  */
 async function verifySingleClause(
+    auditId: string,
     clause: ExtractedClause,
     pageTexts: PageText[],
     warnings: AuditWarning[],
 ): Promise<{ clause: ExtractedClause; verified: boolean }> {
-    // Tier 1: Exact match (fast, high confidence — no penalty)
-    const exact = findExactMatch(clause.source.verbatimText, pageTexts, CITATION_MATCH_CONFIG);
-    if (exact) {
-        return {
-            clause: anchorClause(clause, exact, 1.0, pageTexts, warnings),
-            verified: true,
-        };
-    }
+    const candidates = buildSearchCandidates(clause);
 
-    // Tier 2: Fuzzy match (handles OCR artifacts, minor LLM paraphrasing)
-    const fuzzy = findFuzzyMatch(clause.source.verbatimText, pageTexts, CITATION_MATCH_CONFIG);
-    if (fuzzy) {
-        return {
-            clause: anchorClause(clause, fuzzy, 0.9, pageTexts, warnings),
-            verified: true,
-        };
-    }
-
-    // Tier 3: LLM re-extraction (expensive, last resort)
-    // If rendering fails, reextractFromPage returns null and we fall through to UNVERIFIED.
-    try {
-        const pageImage = await renderPageToImage(clause.source.pageNumber, pageTexts);
-        const pageTextContent =
-            pageTexts.find((p) => p.pageNumber === clause.source.pageNumber)?.text ?? "";
-
-        const reextracted = await reextractFromPage(clause, pageImage, pageTextContent);
-        if (reextracted) {
+    for (const candidate of candidates) {
+        const exact = findExactMatch(candidate, pageTexts, CITATION_MATCH_CONFIG);
+        if (exact) {
+            console.log(
+                `[citations] Exact match verified clause "${clause.label}" on page ${exact.pageNumber}.`,
+            );
             return {
-                clause: anchorClause(clause, reextracted, 0.7, pageTexts, warnings),
+                clause: anchorClause(clause, exact, 1.0, pageTexts, warnings),
                 verified: true,
             };
         }
-    } catch {
-        // Per SPEC: if the Tier 3 LLM call fails or times out, treat the clause as
-        // UNVERIFIED. Do not retry here — retry policy is in lib/agents/retry.ts.
-        // We don't push an additional warning here; the UNVERIFIED warning below covers it.
+
+        const fuzzy = findFuzzyMatch(candidate, pageTexts, CITATION_MATCH_CONFIG);
+        if (fuzzy) {
+            console.log(
+                `[citations] Fuzzy match verified clause "${clause.label}" on page ${fuzzy.pageNumber} with similarity ${fuzzy.similarity.toFixed(3)}.`,
+            );
+            return {
+                clause: anchorClause(clause, fuzzy, 0.9, pageTexts, warnings),
+                verified: true,
+            };
+        }
+    }
+
+    // Tier 3: LLM re-extraction (expensive, last resort)
+    const pageTextContent =
+        pageTexts.find((p) => p.pageNumber === clause.source.pageNumber)?.text ?? "";
+    const reextracted = await reextractFromPage(auditId, clause, pageTextContent);
+    if (reextracted.warning) {
+        warnings.push(reextracted.warning);
+        console.warn(
+            `[citations] Tier 3 re-extraction warning for clause "${clause.label}" on page ${clause.source.pageNumber}: ${reextracted.warning.code}.`,
+        );
+    }
+    if (reextracted.match) {
+        console.log(
+            `[citations] Tier 3 re-extraction verified clause "${clause.label}" on page ${reextracted.match.pageNumber}.`,
+        );
+        return {
+            clause: anchorClause(clause, reextracted.match, 0.7, pageTexts, warnings),
+            verified: true,
+        };
     }
 
     // UNVERIFIED: all three tiers failed. Apply the severe confidence penalty.
@@ -216,6 +201,7 @@ async function verifySingleClause(
  * @param pageTexts - Page-by-page text with word-level bounding boxes
  */
 export async function verifyCitations(
+    auditId: string,
     clauses: ExtractedClause[],
     pageTexts: PageText[],
 ): Promise<VerificationResult> {
@@ -227,6 +213,7 @@ export async function verifyCitations(
     // with parallel Tier 3 re-extraction calls.
     for (const clause of clauses) {
         const { clause: updatedClause, verified } = await verifySingleClause(
+            auditId,
             clause,
             pageTexts,
             warnings,
@@ -244,4 +231,22 @@ export async function verifyCitations(
         unverifiedClauseIds,
         warnings,
     };
+}
+
+function buildSearchCandidates(clause: ExtractedClause): string[] {
+    const candidates: string[] = [];
+    const verbatim = clause.source.verbatimText?.trim() ?? "";
+    const rawValue = clause.rawValue?.trim() ?? "";
+
+    if (verbatim.length >= 8) {
+        candidates.push(verbatim);
+    }
+    if (rawValue && !candidates.includes(rawValue)) {
+        candidates.push(rawValue);
+    }
+    if (verbatim && !candidates.includes(verbatim)) {
+        candidates.push(verbatim);
+    }
+
+    return candidates;
 }

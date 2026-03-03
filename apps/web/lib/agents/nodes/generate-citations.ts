@@ -55,7 +55,7 @@ export async function generateCitationsNode(state: AgentState): Promise<Partial<
     let verifiedClauses = clauses;
 
     try {
-        const result = await verifyCitations(clauses, pageTexts);
+        const result = await verifyCitations(state.audit.auditId ?? "", clauses, pageTexts);
         verifiedClauses = result.verifiedClauses;
 
         // Merge citation-generated warnings
@@ -65,6 +65,9 @@ export async function generateCitationsNode(state: AgentState): Promise<Partial<
 
         // Log summary info for unverified clauses
         if (result.unverifiedClauseIds.length > 0) {
+            console.warn(
+                `[citations] ${result.unverifiedClauseIds.length} clause(s) remained unverified for audit ${state.audit.auditId ?? "unknown"}.`,
+            );
             warnings.push({
                 code: "CITE_UNVERIFIED_SUMMARY",
                 message: `${result.unverifiedClauseIds.length} clause(s) could not be verified in the source document`,

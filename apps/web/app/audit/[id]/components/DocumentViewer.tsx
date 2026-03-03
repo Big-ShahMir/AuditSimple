@@ -23,7 +23,11 @@ export function DocumentViewer({ documentUrl, activeClause }: DocumentViewerProp
         async function loadDocument() {
             try {
                 setLoading(true);
-                loadingTask = pdfjsLib.getDocument(documentUrl);
+                const resolvedUrl = documentUrl.startsWith("local://uploads/")
+                    ? `/api/local-document?path=${encodeURIComponent(documentUrl)}`
+                    : documentUrl;
+
+                loadingTask = pdfjsLib.getDocument(resolvedUrl);
                 const doc = await loadingTask.promise;
                 setPdfDoc(doc);
                 setNumPages(doc.numPages);

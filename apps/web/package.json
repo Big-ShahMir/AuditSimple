@@ -6,13 +6,15 @@
         "@prisma/client": "^5.22.0",
         "@react-pdf/renderer": "^4.3.2",
         "@vercel/blob": "^0.27",
+        "better-auth": "^1.5.5",
         "ioredis": "^5.10.0",
         "next": "^16.1.6",
         "openai": "^6.25.0",
         "pdfjs-dist": "^4",
         "prisma": "^5.22.0",
         "react": "^19.2.4",
-        "react-dom": "^19.2.4"
+        "react-dom": "^19.2.4",
+        "resend": "^6.9.3"
     },
     "devDependencies": {
         "@prisma/config": "^7.4.2",

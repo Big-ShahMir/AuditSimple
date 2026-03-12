@@ -116,32 +116,87 @@ export async function POST(request: NextRequest) {
                 },
             );
 
-            const updateData: Record<string, unknown> = {
+            // ── Base audit update (always runs) ───────────────────────────
+            const baseUpdate: Record<string, unknown> = {
                 status: isComplete ? AuditStatus.COMPLETE : AuditStatus.FAILED,
                 completedAt: now,
                 updatedAt: now,
-                warnings: JSON.stringify(finalState.errors ?? []),
+                // warnings is a native Json column — Prisma handles serialization
+                warnings: finalState.errors ?? [],
             };
 
             if (isComplete && finalState.audit) {
                 const { audit } = finalState;
-                Object.assign(updateData, {
+                Object.assign(baseUpdate, {
                     contractType: audit.contractType ?? null,
                     riskScore: audit.riskScore ?? null,
                     executiveSummary: audit.executiveSummary ?? null,
-                    clauses: JSON.stringify(audit.clauses ?? []),
-                    issues: JSON.stringify(audit.issues ?? []),
-                    costOfLoyalty: JSON.stringify(audit.costOfLoyalty ?? null),
+                    // costOfLoyalty is a native Json column — no stringify needed
+                    costOfLoyalty: audit.costOfLoyalty ?? null,
                 });
             }
 
             try {
                 await (prisma as any).audit.update({
                     where: { id: auditId },
-                    data: updateData,
+                    data: baseUpdate,
                 });
+
+                // ── Persist clauses as normalized relational rows ──────────
+                const clauses = finalState.audit?.clauses ?? [];
+                if (isComplete && clauses.length > 0) {
+                    await (prisma as any).clause.createMany({
+                        data: clauses.map((c: any) => ({
+                            id: c.clauseId,
+                            auditId,
+                            label: c.label,
+                            category: c.category,
+                            rawValue: c.rawValue,
+                            numericValue: c.numericValue ?? null,
+                            unit: c.unit ?? null,
+                            plainLanguageSummary: c.plainLanguageSummary,
+                            // sourceLocation is a Json column — Prisma handles it
+                            sourceLocation: c.source,
+                            extractionConfidence: c.extractionConfidence,
+                            verified: c.verified ?? false,
+                        })),
+                        skipDuplicates: true,
+                    });
+                }
+
+                // ── Persist issues as normalized relational rows ───────────
+                // Created one-by-one so we can connect relatedClauses via the
+                // implicit many-to-many ClauseIssues join table.
+                const issues = finalState.audit?.issues ?? [];
+                if (isComplete && issues.length > 0) {
+                    for (const issue of issues as any[]) {
+                        const relatedClauseIds: string[] = (issue.relatedClauses ?? [])
+                            .map((rc: any) => rc.clauseId)
+                            .filter(Boolean);
+
+                        await (prisma as any).issue.create({
+                            data: {
+                                id: issue.issueId,
+                                auditId,
+                                severity: issue.severity,
+                                title: issue.title,
+                                description: issue.description,
+                                detailedAnalysis: issue.detailedAnalysis,
+                                // benchmarkData is Json — no stringify
+                                benchmarkData: issue.benchmarkComparison ?? null,
+                                estimatedCost: issue.estimatedLifetimeCost ?? null,
+                                tags: issue.tags ?? [],
+                                confidence: issue.confidence,
+                                clauses: relatedClauseIds.length > 0
+                                    ? { connect: relatedClauseIds.map((id: string) => ({ id })) }
+                                    : undefined,
+                            },
+                        });
+                    }
+                }
+
                 console.log(
-                    `[upload] Persisted final audit state for ${auditId} as ${updateData.status}.`,
+                    `[upload] Persisted final audit state for ${auditId} as ${baseUpdate.status}.`,
                 );
             } catch (err) {
                 console.error(

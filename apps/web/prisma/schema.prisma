@@ -1,8 +1,4 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+// ── Generator & Datasource ─────────────────────────────────────────────────
 
 generator client {
   provider = "prisma-client-js"
@@ -13,55 +9,146 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ── User ───────────────────────────────────────────────────────────────────
+// Registered users who create an account to persist audit history.
+
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  name          String?
+  emailVerified Boolean   @default(false)
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  audits   Audit[]
+  sessions Session[]
+  accounts Account[]
+
+  @@map("user")
+}
+
+// ── GuestSession ───────────────────────────────────────────────────────────
+// Token-based guest access. Token is stored in a browser cookie.
+// Audits linked to a GuestSession can be claimed by a User after sign-up.
+
+model GuestSession {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  audits Audit[]
+
+  @@index([token])
+  @@index([expiresAt])
+}
+
 // ── Audit ──────────────────────────────────────────────────────────────────
-// Central entity. Created by lib/ingestion/index.ts during upload and
-// progressively updated by the analysis pipeline (lib/agents).
-// JSON fields (clauses, issues, etc.) are stored as TEXT because Prisma's
-// PostgreSQL provider maps String → text, which is sufficient for all sizes.
+// Central entity. Created on upload and progressively updated by the
+// analysis pipeline. Exactly one of userId or guestSessionId should be set.
 
 model Audit {
   id               String    @id @default(uuid())
-  status           String    // AuditStatus enum value
+  status           String    @default("UPLOADING") // AuditStatus enum value
+  contractType     String?                          // ContractType enum value
   originalFileName String
   documentHash     String
-  documentUrl      String?   // Set after Vercel Blob upload
-  mimeType         String?   // Stored for document URL reconstruction
+  documentUrl      String?                          // Vercel Blob URL
+  mimeType         String?
 
-  // Set after PII scrubbing
+  // Persisted for AgentState reconstruction between pipeline steps
   scrubbledText    String?
-  pageTextsJson    String?   // JSON: AgentState["pageTexts"]
-  totalPiiRedacted Int?
-  entityTypeCounts String?   // JSON: Record<PIIEntityType, number>
+  pageTextsJson    String?                          // JSON: AgentState["pageTexts"]
 
   // Set after pipeline completes
-  contractType     String?   // ContractType enum value
   riskScore        Int?
   executiveSummary String?
-  clauses          String?   // JSON: ExtractedClause[]
-  issues           String?   // JSON: AuditIssue[]
-  costOfLoyalty    String?   // JSON: CostOfLoyalty
-  warnings         String?   // JSON: AuditWarning[]
+  costOfLoyalty    Json?                            // CostOfLoyalty interface
+  warnings         Json      @default("[]")         // AuditWarning[]
 
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
   completedAt      DateTime?
 
-  piiRecord        PIIRecord?
+  // Ownership — exactly one should be non-null
+  userId         String?
+  guestSessionId String?
+
+  // Relations
+  user         User?         @relation(fields: [userId], references: [id])
+  guestSession GuestSession? @relation(fields: [guestSessionId], references: [id])
+  clauses      Clause[]
+  issues       Issue[]
+  piiRecord    PIIRecord?
+
+  @@index([status])
+  @@index([createdAt])
+  @@index([userId])
+  @@index([guestSessionId])
 }
 
-// ── PIIRecord ───────────────────────────────────────────────────────────────
-// Stores the AES-256-GCM encrypted PII map. One record per audit.
+// ── Clause ─────────────────────────────────────────────────────────────────
+// A single clause extracted from the contract. Grounded in SourceLocation.
+
+model Clause {
+  id                   String  @id @default(uuid())
+  auditId              String
+  label                String
+  category             String
+  rawValue             String
+  numericValue         Float?
+  unit                 String?
+  plainLanguageSummary String
+  sourceLocation       Json    // SourceLocation interface
+  extractionConfidence Float
+  verified             Boolean @default(false)
+
+  audit  Audit   @relation(fields: [auditId], references: [id], onDelete: Cascade)
+  issues Issue[] @relation("ClauseIssues")
+
+  @@index([auditId])
+  @@index([category])
+}
+
+// ── Issue ──────────────────────────────────────────────────────────────────
+// A flagged problem. Every Issue is grounded in one or more Clauses.
+
+model Issue {
+  id               String   @id @default(uuid())
+  auditId          String
+  severity         String
+  title            String
+  description      String
+  detailedAnalysis String
+  benchmarkData    Json?    // ClauseBenchmark interface
+  estimatedCost    Float?
+  tags             String[]
+  confidence       Float
+
+  audit   Audit    @relation(fields: [auditId], references: [id], onDelete: Cascade)
+  clauses Clause[] @relation("ClauseIssues")
+
+  @@index([auditId])
+  @@index([severity])
+}
+
+// ── PIIRecord ──────────────────────────────────────────────────────────────
+// AES-256-GCM encrypted PII map. One record per audit.
 // The plaintext piiMap never appears outside lib/ingestion.
 
 model PIIRecord {
   id              String @id @default(uuid())
   auditId         String @unique
   encryptedPiiMap Bytes
+  entityCounts    Json   // Record<PIIEntityType, number>
+  totalRedacted   Int
 
-  audit           Audit  @relation(fields: [auditId], references: [id])
+  audit Audit @relation(fields: [auditId], references: [id], onDelete: Cascade)
 }
 
 // ── BenchmarkRate ───────────────────────────────────────────────────────────
+// Fair-market benchmark data. Seeded from lib/benchmarks/seed.ts.
 
 model BenchmarkRate {
   id           String   @id @default(uuid())
@@ -74,5 +161,56 @@ model BenchmarkRate {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
+  @@index([category, asOfDate])
   @@unique([sourceName, category, asOfDate])
+}
+
+// ── Better Auth Models ─────────────────────────────────────────────────────
+
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([token])
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
 }

@@ -70,5 +70,6 @@ coverage/
 .vercel
 
 .claude
-
+skills-lock.json
 sample_mortgage_agreement.pdf
+.agents/

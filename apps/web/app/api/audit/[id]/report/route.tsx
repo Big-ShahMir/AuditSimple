@@ -1,18 +1,11 @@
 // ============================================================
-// apps/web/app/api/audit/[id]/report/route.ts
+// apps/web/app/api/audit/[id]/report/route.tsx
 // ============================================================
 // GET /api/audit/[id]/report
 //
-// MVP: redirects the caller to the original document URL stored in
-// Vercel Blob. This gives the user access to the source document
-// while the full formatted report feature is developed.
-//
-// TODO: Generate formatted PDF audit report post-MVP.
-//   - Use a PDF generation library (e.g., @react-pdf/renderer or puppeteer)
-//     to produce a styled SimplyAudit report from the ContractAudit data.
-//   - Include: executive summary, cost of loyalty, issues table,
-//     clause-by-clause breakdown, benchmark comparisons, and citations.
-//   - Stream the generated PDF directly or upload it to Blob and redirect.
+// Generates a downloadable PDF audit report using @react-pdf/renderer.
+// Loads the full audit with related clauses and issues from the DB,
+// maps them to the ContractAudit interface, and streams the PDF.
 // ============================================================
 
 import { NextRequest, NextResponse } from "next/server";
@@ -24,9 +17,16 @@ export async function GET(
 ) {
     const { id: auditId } = await params;
 
+    // ─── 1. Load record with relations ───────────────────────────────────────
     const record = await (prisma as any).audit.findUnique({
         where: { id: auditId },
-        select: { documentUrl: true },
+        include: {
+            clauses: true,
+            issues: {
+                include: { clauses: true },
+            },
+            piiRecord: true,
+        },
     });
 
     if (!record) {
@@ -43,29 +43,77 @@ export async function GET(
         );
     }
 
-    // Dynamically generate the formatted PDF report
+    // ─── 2. Map DB rows → ContractAudit interface shape ──────────────────────
+    const clauses = (record.clauses ?? []).map((c: any) => ({
+        clauseId: c.id,
+        label: c.label,
+        category: c.category,
+        rawValue: c.rawValue,
+        numericValue: c.numericValue ?? null,
+        unit: c.unit ?? null,
+        plainLanguageSummary: c.plainLanguageSummary,
+        source: c.sourceLocation,
+        extractionConfidence: c.extractionConfidence,
+        verified: c.verified,
+    }));
+
+    const issues = (record.issues ?? []).map((issue: any) => ({
+        issueId: issue.id,
+        severity: issue.severity,
+        title: issue.title,
+        description: issue.description,
+        detailedAnalysis: issue.detailedAnalysis,
+        relatedClauses: (issue.clauses ?? []).map((c: any) => ({
+            clauseId: c.id,
+            label: c.label,
+            category: c.category,
+            rawValue: c.rawValue,
+            numericValue: c.numericValue ?? null,
+            unit: c.unit ?? null,
+            plainLanguageSummary: c.plainLanguageSummary,
+            source: c.sourceLocation,
+            extractionConfidence: c.extractionConfidence,
+            verified: c.verified,
+        })),
+        benchmarkComparison: issue.benchmarkData ?? null,
+        estimatedLifetimeCost: issue.estimatedCost ?? null,
+        tags: issue.tags ?? [],
+        confidence: issue.confidence,
+    }));
+
+    const parsedAudit = {
+        auditId: record.id,
+        status: record.status,
+        createdAt: (record.createdAt as Date).toISOString(),
+        updatedAt: (record.updatedAt as Date).toISOString(),
+        completedAt: record.completedAt
+            ? (record.completedAt as Date).toISOString()
+            : null,
+        contractType: record.contractType ?? null,
+        originalFileName: record.originalFileName,
+        documentHash: record.documentHash,
+        piiSummary: {
+            totalRedacted: record.piiRecord?.totalRedacted ?? 0,
+            entityTypeCounts: record.piiRecord?.entityCounts ?? {},
+        },
+        clauses,
+        issues,
+        costOfLoyalty: record.costOfLoyalty ?? null,
+        riskScore: record.riskScore ?? null,
+        executiveSummary: record.executiveSummary ?? null,
+        warnings: Array.isArray(record.warnings) ? record.warnings : [],
+    };
+
+    // ─── 3. Generate + stream PDF ─────────────────────────────────────────────
     try {
-        const fullAudit = await (prisma as any).audit.findUnique({
-            where: { id: auditId },
-        });
-
-        if (!fullAudit) {
-            return NextResponse.json({ error: "Audit not found" }, { status: 404 });
-        }
-
-        // Parse JSON fields from the database
-        const parsedAudit = {
-            ...fullAudit,
-            auditId: fullAudit.id,
-            clauses: fullAudit.clauses ? JSON.parse(fullAudit.clauses) : [],
-            issues: fullAudit.issues ? JSON.parse(fullAudit.issues) : [],
-            costOfLoyalty: fullAudit.costOfLoyalty ? JSON.parse(fullAudit.costOfLoyalty) : null,
-        };
-
         const { renderToStream } = await import("@react-pdf/renderer");
-        const { AuditReportPDF } = await import("@/app/audit/[id]/components/AuditReportPDF");
+        const { AuditReportPDF } = await import(
+            "@/app/audit/[id]/components/AuditReportPDF"
+        );
 
-        const stream = await renderToStream(<AuditReportPDF audit={parsedAudit as any} />);
+        const stream = await renderToStream(
+            <AuditReportPDF audit={parsedAudit as any} />
+        );
 
         // Convert Node.js Readable stream to Web ReadableStream
         const webStream = new ReadableStream({

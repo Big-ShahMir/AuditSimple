@@ -39,10 +39,10 @@ import { PIIServiceUnavailableError } from "./presidio-client";
 
 // The Prisma client is imported here. If the schema changes, update field
 // names below to match. Currently assumes:
-//   - model Audit { auditId, status, documentHash, originalFileName,
+//   - model Audit { id, status, documentHash, originalFileName,
 //                   documentUrl, scrubbledText, pageTextsJson,
-//                   totalPiiRedacted, warnings, createdAt, updatedAt }
-//   - model PIIRecord { id, auditId, encryptedPiiMap }
+//                   warnings (Json), createdAt, updatedAt }
+//   - model PIIRecord { id, auditId, encryptedPiiMap, entityCounts, totalRedacted }
 //
 // If the Prisma client is at a different path, update the import below.
 import { PrismaClient } from "@prisma/client";
@@ -215,18 +215,6 @@ export async function validateAndIngest(
         );
     }
 
-    await (prisma as any).pIIRecord.create({
-        data: {
-            auditId,
-            encryptedPiiMap,
-        },
-    });
-
-    // piiMap is now encrypted and durably stored — discard the plaintext
-    // This variable intentionally goes out of scope here, but we keep explicit
-    // nulling as a defensive measure for GC signalling in long-running servers.
-    (scrubResult as { piiMap?: unknown }).piiMap = undefined;
-
     // ─── STEP 7: Build entity type counts for piiSummary ─────────────────────
     const entityTypeCounts = entities.reduce(
         (acc: Record<string, number>, e: (typeof entities)[number]) => {
@@ -236,6 +224,20 @@ export async function validateAndIngest(
         {} as Record<string, number>
     );
 
+    await (prisma as any).pIIRecord.create({
+        data: {
+            auditId,
+            encryptedPiiMap,
+            entityCounts: entityTypeCounts,
+            totalRedacted,
+        },
+    });
+
+    // piiMap is now encrypted and durably stored — discard the plaintext
+    // This variable intentionally goes out of scope here, but we keep explicit
+    // nulling as a defensive measure for GC signalling in long-running servers.
+    (scrubResult as { piiMap?: unknown }).piiMap = undefined;
+
     // ─── STEP 8: Persist scrubbed text and update Audit record ───────────────
     await (prisma as any).audit.update({
         where: { id: auditId },
@@ -243,9 +245,7 @@ export async function validateAndIngest(
             status: AuditStatus.CLASSIFYING, // Ready for the agents pipeline
             scrubbledText,
             pageTextsJson: JSON.stringify(pageTexts),
-            totalPiiRedacted: totalRedacted,
-            entityTypeCounts: JSON.stringify(entityTypeCounts),
-            warnings: JSON.stringify(warnings),
+            warnings,
         },
     });
 
@@ -293,6 +293,7 @@ export async function getProcessedState(
 ): Promise<AgentState | null> {
     const auditRecord = await (prisma as any).audit.findUnique({
         where: { id: auditId },
+        include: { piiRecord: true },
     });
 
     if (!auditRecord) return null;
@@ -312,8 +313,8 @@ export async function getProcessedState(
 
     let warnings: AuditWarning[] = [];
     try {
-        if (audit.warnings) {
-            warnings = JSON.parse(audit.warnings) as AuditWarning[];
+        if (Array.isArray(audit.warnings)) {
+            warnings = audit.warnings as AuditWarning[];
         }
     } catch {
         // Non-fatal — proceed with empty warnings
@@ -329,18 +330,12 @@ export async function getProcessedState(
             originalFileName: audit.originalFileName,
             documentHash: audit.documentHash,
             piiSummary: {
-                totalRedacted: audit.totalPiiRedacted ?? 0,
-                entityTypeCounts: audit.entityTypeCounts
-                    ? (JSON.parse(audit.entityTypeCounts) as AgentState["audit"]["piiSummary"] extends infer P
-                        ? P extends { entityTypeCounts: infer E }
-                        ? E
-                        : Record<string, number>
-                        : Record<string, number>)
-                    : ({} as AgentState["audit"]["piiSummary"] extends infer P
-                        ? P extends { entityTypeCounts: infer E }
-                        ? E
-                        : never
-                        : never),
+                totalRedacted: audit.piiRecord?.totalRedacted ?? 0,
+                entityTypeCounts: (audit.piiRecord?.entityCounts ?? {}) as AgentState["audit"]["piiSummary"] extends infer P
+                    ? P extends { entityTypeCounts: infer E }
+                    ? E
+                    : Record<string, number>
+                    : Record<string, number>,
             },
             warnings,
             clauses: [],

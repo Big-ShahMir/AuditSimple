@@ -10,7 +10,7 @@
 //                                       estimatedSecondsRemaining }
 //
 // Progress is sourced from the Redis snapshot key written by
-// lib/agents/progress.ts: `audit:progress:{auditId}`.
+// lib/agents/progress.ts: `audit:progress:{auditId}`
 // ============================================================
 
 import { NextRequest, NextResponse } from "next/server";
@@ -22,24 +22,22 @@ import { prisma } from "@/lib/prisma";
 // Used to back-calculate estimatedSecondsRemaining from progress %.
 const ESTIMATED_TOTAL_SECONDS = 90;
 
-function tryParseJson<T>(raw: string | null | undefined, fallback: T): T {
-    if (!raw) return fallback;
-    try {
-        return JSON.parse(raw) as T;
-    } catch {
-        return fallback;
-    }
-}
-
 export async function GET(
     _request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
     const { id: auditId } = await params;
 
-    // ─── 1. Load audit record ─────────────────────────────────────────────────
+    // ─── 1. Load audit record with relations ──────────────────────────────────
     const auditRecord = await (prisma as any).audit.findUnique({
         where: { id: auditId },
+        include: {
+            clauses: true,
+            issues: {
+                include: { clauses: true },
+            },
+            piiRecord: true,
+        },
     });
 
     if (!auditRecord) {
@@ -50,6 +48,45 @@ export async function GET(
 
     // ─── 2a. COMPLETE → full AuditResultResponse ──────────────────────────────
     if (audit.status === AuditStatus.COMPLETE) {
+        // Map DB Clause rows → ExtractedClause interface shape
+        const clauses = (audit.clauses ?? []).map((c: any) => ({
+            clauseId: c.id,
+            label: c.label,
+            category: c.category,
+            rawValue: c.rawValue,
+            numericValue: c.numericValue ?? null,
+            unit: c.unit ?? null,
+            plainLanguageSummary: c.plainLanguageSummary,
+            source: c.sourceLocation,
+            extractionConfidence: c.extractionConfidence,
+            verified: c.verified,
+        }));
+
+        // Map DB Issue rows → AuditIssue interface shape
+        const issues = (audit.issues ?? []).map((issue: any) => ({
+            issueId: issue.id,
+            severity: issue.severity,
+            title: issue.title,
+            description: issue.description,
+            detailedAnalysis: issue.detailedAnalysis,
+            relatedClauses: (issue.clauses ?? []).map((c: any) => ({
+                clauseId: c.id,
+                label: c.label,
+                category: c.category,
+                rawValue: c.rawValue,
+                numericValue: c.numericValue ?? null,
+                unit: c.unit ?? null,
+                plainLanguageSummary: c.plainLanguageSummary,
+                source: c.sourceLocation,
+                extractionConfidence: c.extractionConfidence,
+                verified: c.verified,
+            })),
+            benchmarkComparison: issue.benchmarkData ?? null,
+            estimatedLifetimeCost: issue.estimatedCost ?? null,
+            tags: issue.tags ?? [],
+            confidence: issue.confidence,
+        }));
+
         return NextResponse.json({
             audit: {
                 auditId: audit.id,
@@ -63,15 +100,15 @@ export async function GET(
                 originalFileName: audit.originalFileName,
                 documentHash: audit.documentHash,
                 piiSummary: {
-                    totalRedacted: audit.totalPiiRedacted ?? 0,
-                    entityTypeCounts: tryParseJson(audit.entityTypeCounts, {}),
+                    totalRedacted: audit.piiRecord?.totalRedacted ?? 0,
+                    entityTypeCounts: audit.piiRecord?.entityCounts ?? {},
                 },
-                clauses: tryParseJson(audit.clauses, []),
-                issues: tryParseJson(audit.issues, []),
-                costOfLoyalty: tryParseJson(audit.costOfLoyalty, null),
+                clauses,
+                issues,
+                costOfLoyalty: audit.costOfLoyalty ?? null,
                 riskScore: audit.riskScore ?? null,
                 executiveSummary: audit.executiveSummary ?? null,
-                warnings: tryParseJson(audit.warnings, []),
+                warnings: Array.isArray(audit.warnings) ? audit.warnings : [],
             },
             // documentUrl is the Vercel Blob URL stored during ingestion
             documentViewUrl: audit.documentUrl ?? null,
@@ -88,17 +125,19 @@ export async function GET(
         try {
             const cached = await redis.get(`audit:progress:${auditId}`);
             if (cached) {
-                const event = tryParseJson<{
+                const event = JSON.parse(cached) as {
                     type: string;
                     progress?: number;
                     message?: string;
-                }>(cached, { type: "unknown" });
+                };
 
                 if (event.type === "status_change") {
                     progress = event.progress ?? 0;
                     currentStage = event.message ?? currentStage;
                 }
             }
+        } catch {
+            // Non-fatal — return default progress values if Redis is unavailable
         } finally {
             redis.disconnect();
         }

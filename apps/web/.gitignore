@@ -9,3 +9,5 @@ node_modules
 
 /pycache/
 __pycache__/
+
+SYSTEM_DESIGN.md

@@ -22,3 +22,6 @@ export { WEALTHSIMPLE_RATES } from "./sources/wealthsimple";
 
 // Internal types that consumers may need for type-checking
 export type { StaleReport, WealthsimpleRateConfig, BocRateConfig } from "./types";
+
+// Automated benchmark updater — fetches live BOC + Wealthsimple rates
+export { runBenchmarkUpdate } from "./updater/graph";

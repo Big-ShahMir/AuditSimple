@@ -2,6 +2,7 @@
 
 import React, { useCallback, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 const ACCEPTED_TYPES = ["application/pdf", "image/png", "image/jpeg", "image/webp"];
 const ACCEPTED_EXT = ".pdf, .png, .jpg, .jpeg, .webp";
@@ -62,7 +63,20 @@ export default function DashboardPage() {
     const onDragLeave = () => setDragging(false);
 
     return (
-        <div className="min-h-screen flex flex-col items-center justify-center px-4">
+        <div className="relative min-h-screen flex flex-col items-center justify-center px-4">
+            {/* Back to reports */}
+            <div className="absolute top-8 left-8">
+                <Link
+                    href="/reports"
+                    className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800 transition-colors group"
+                >
+                    <svg className="w-4 h-4 transition-transform group-hover:-translate-x-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                    </svg>
+                    Back to My Reports
+                </Link>
+            </div>
+
             {/* Header */}
             <div className="text-center mb-12">
                 <div className="inline-flex items-center gap-2 text-xs font-semibold tracking-widest uppercase text-slate-400 mb-6">

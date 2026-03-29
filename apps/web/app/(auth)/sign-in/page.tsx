@@ -20,21 +20,21 @@ export default function SignInPage() {
         const { error: signInError } = await signIn.email({
             email,
             password,
-            callbackURL: "/dashboard",
+            callbackURL: "/reports",
         });
 
         if (signInError) {
             setError(signInError.message ?? "Invalid email or password.");
             setLoading(false);
         } else {
-            router.push("/dashboard");
+            router.push("/reports");
         }
     };
 
     const handleGoogleSignIn = async () => {
         await signIn.social({
             provider: "google",
-            callbackURL: "/dashboard",
+            callbackURL: "/reports",
         });
     };
 

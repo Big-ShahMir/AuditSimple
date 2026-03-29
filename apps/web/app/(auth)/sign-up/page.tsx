@@ -22,21 +22,21 @@ export default function SignUpPage() {
             email,
             password,
             name,
-            callbackURL: "/dashboard",
+            callbackURL: "/reports",
         });
 
         if (signUpError) {
             setError(signUpError.message ?? "Could not create your account. Please try again.");
             setLoading(false);
         } else {
-            router.push("/dashboard");
+            router.push("/reports");
         }
     };
 
     const handleGoogleSignIn = async () => {
         await signIn.social({
             provider: "google",
-            callbackURL: "/dashboard",
+            callbackURL: "/reports",
         });
     };
 

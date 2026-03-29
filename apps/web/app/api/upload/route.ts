@@ -17,12 +17,14 @@
 // ============================================================
 
 import { NextRequest, NextResponse } from "next/server";
+import { headers } from "next/headers";
 import { validateAndIngest } from "@/lib/ingestion";
 import { runAuditPipeline } from "@/lib/agents";
 import { runMockPipeline } from "@/lib/agents";
 import { AuditStatus } from "@auditsimple/types";
 import type { AgentState } from "@auditsimple/types";
 import { prisma } from "@/lib/prisma";
+import { auth } from "@/lib/auth";
 
 const ALLOWED_MIMES = new Set([
     "application/pdf",
@@ -32,6 +34,10 @@ const ALLOWED_MIMES = new Set([
 ]);
 
 export async function POST(request: NextRequest) {
+    // ─── 0. Resolve session (optional — guests allowed) ──────────────────────
+    const session = await auth.api.getSession({ headers: await headers() });
+    const userId = session?.user?.id ?? null;
+
     // ─── 1. Parse multipart form data ────────────────────────────────────────
     let formData: FormData;
     try {
@@ -81,6 +87,14 @@ export async function POST(request: NextRequest) {
         });
         auditId = result.auditId;
         state = result.state;
+
+        // Associate audit with the authenticated user (if logged in)
+        if (userId) {
+            await prisma.audit.update({
+                where: { id: auditId },
+                data: { userId },
+            });
+        }
     } catch (err) {
         const code =
             (err as { code?: string }).code ?? "INGESTION_FAILED";

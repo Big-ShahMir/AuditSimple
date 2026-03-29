@@ -24,7 +24,7 @@ const nvidia = new OpenAI({
     baseURL: "https://integrate.api.nvidia.com/v1",
 });
 
-const CLASSIFY_TIMEOUT_MS = 30_000;
+const CLASSIFY_TIMEOUT_MS = 90_000;
 const LOW_CONFIDENCE_THRESHOLD = 0.6;
 
 // ---------------------------------------------------------------------------

@@ -56,25 +56,24 @@ simplyaudit/
 │   └── web/                     # Next.js fullstack application
 │       ├── app/
 │       │   ├── (auth)/          # Sign-in, sign-up, forgot password
-│       │   ├── api/             # API routes (upload, audit, auth)
-│       │   ├── audit/[id]/      # Audit detail page
-│       │   └── dashboard/       # User dashboard
+│       │   ├── api/             # API routes (upload, audit, auth, local-document)
+│       │   ├── audit/[id]/      # Audit detail page (components, hooks, lib)
+│       │   ├── dashboard/       # Upload page
+│       │   └── reports/         # Audit history / post-login landing page
 │       ├── lib/
 │       │   ├── agents/          # LangGraph.js state machine (7-node pipeline)
+│       │   │   └── nodes/       # Individual pipeline stage handlers
 │       │   ├── analysis/        # Clause extraction templates & validation rules
-│       │   ├── benchmarks/      # Market rate data & comparison logic
+│       │   ├── benchmarks/      # Market rate data, sources & updater agent
 │       │   ├── citations/       # Citation verification engine
 │       │   └── ingestion/       # Document upload, text extraction, PII scrubbing
-│       └── prisma/              # Database schema & migrations
+│       ├── prisma/              # Database schema & migrations
+│       └── scripts/             # One-off utility scripts
 ├── packages/
 │   └── types/                   # Shared TypeScript interfaces
-├── services/
-│   └── presidio/                # Dockerized PII detection sidecar (Python)
-│       ├── app.py               # Flask/Gunicorn API server
-│       ├── recognizers/         # Custom Canadian financial PII recognizers
-│       ├── Dockerfile           # Multi-stage Docker build
-│       └── requirements.txt     # Python dependencies
-└── SYSTEM_DESIGN.md             # Full system design document
+└── services/
+    └── presidio/                # Dockerized PII detection sidecar (Python)
+        └── recognizers/         # Custom Canadian financial PII recognizers
 ```
 
 ### Tech Stack
